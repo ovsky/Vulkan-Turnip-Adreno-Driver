@@ -1,139 +1,186 @@
 # Adreno Mesa Drivers Toolkit
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Status-Latest%20R29%20Auto--Build-brightgreen?style=for-the-badge" alt="Latest R29 Auto-Build" />
+  <img src="https://img.shields.io/badge/Target-Adreno%20GPU-8A2BE2?style=for-the-badge" alt="Target Adreno GPU" />
+  <img src="https://img.shields.io/badge/Build-GitHub%20Actions-181717?style=for-the-badge" alt="GitHub Actions" />
+  <img src="https://img.shields.io/badge/Stack-Turnip%20%2B%20Zink-00BFFF?style=for-the-badge" alt="Turnip + Zink" />
+</p>
+
+A comprehensive, automated toolkit for sharing, building, and distributing the latest upstream Mesa Turnip/Zink drivers for Qualcomm Adreno GPUs.
+
+This project bridges the gap between upstream Linux graphics development and Android emulation by packaging fresh Mesa builds into a usable, installable driver archive for end users and developers.
+
+## Latest update: R29 Auto-Build
+
+The current automation workflow builds directly from the latest upstream Mesa sources and publishes a fresh driver package as a GitHub release artifact.
+
+### Current build characteristics
+- Driver family: Turnip + Zink
+- Build source: latest upstream Mesa mainline
+- Architecture target: aarch64-linux-android
+- Packaging: automated ZIP release artifacts
+- CI workflow: GitHub Actions
+- Release model: continuous auto-builds with versioned artifacts
+
+### Why this is useful
+- Keeps the driver aligned with upstream fixes and performance improvements
+- Reduces manual setup for users who want fresh Mesa builds
+- Provides an easy way to test new Adreno driver changes in emulation stacks
+- Makes driver sharing simpler and more reproducible
+
+---
+
+## Highlights
+
+- Automated upstream Mesa builds from source
+- CI/CD release packaging for quick distribution
+- Support for Adreno-based GPU environments and emulation use cases
+- Focus on Turnip and related Mesa GPU stack improvements
+- Ready for local builds and custom experimentation
+
+---
+
+## Quick start
+
+1. Download the latest released ZIP from the repository Releases page.
+2. Do not extract the ZIP before loading it into your emulator or custom driver manager.
+3. In your app/emulator, go to the GPU or custom driver configuration screen.
+4. Install or select the driver archive as the active Vulkan driver.
+5. Clear shader caches on first boot if needed and test compatibility.
+
+> Note: The release artifact is meant to be used as a packaged driver bundle, not as a source tree.
+
+---
+
+## Local build workflow
+
+This repository includes a build pipeline designed to fetch Mesa, set up the Android cross-compilation environment, and package the resulting driver.
+
+### Prerequisites
+- Linux environment (Ubuntu 22.04 or similar is recommended)
+- Android NDK
+- Python 3.10+
+- Meson, Ninja, Flex, Bison, pkg-config
+- Common build tooling such as CMake and Git
+
+### Example build
+
+```bash
+# Clone the repository
+git clone https://github.com/ovsky/Vulkan-Turnip-Adreno-Driver.git
+cd Vulkan-Turnip-Adreno-Driver
+
+# Set your NDK path
+export NDK_HOME=/path/to/android-ndk
+
+# Run the automated build script
+./build_turnip.sh --release
+```
+
+The script is responsible for:
+1. Fetching the current Mesa source tree
+2. Generating the cross-compilation environment
+3. Configuring the Turnip / Freedreno build
+4. Compiling the Adreno Vulkan driver
+5. Packaging the result into a distributable ZIP
+
+---
+
+## CI/CD pipeline
+
+The project includes automated GitHub Actions workflows that:
+- trigger on a schedule and manual dispatch
+- check out the repository
+- install dependencies
+- run the Turnip build script
+- publish the generated ZIP as a GitHub Release artifact
+
+This is the heart of the auto-build model: each run publishes a fresh driver package from the latest upstream state.
+
+---
+
+## Technical overview
+
+Building a graphics driver for Android user-space requires working around the system vendor stack and hooking into the selected Vulkan loader path. The project addresses that by providing a reproducible build pipeline around upstream Mesa sources, with Turnip as the core Vulkan driver stack and Zink as an optional OpenGL-over-Vulkan translation layer.
+
+### Core idea
+- Use upstream Mesa code as the basis for the driver
+- Cross-compile for Android/aarch64 target usage
+- Package the resulting Vulkan binary into a driver archive
+- Let emulation layers or custom driver managers consume the package
+
+### Why it matters
+This approach helps keep the driver aligned with current upstream work while making it easier to share fresh driver builds across devices, emulators, and testing environments.
+
+---
+
+## Compatibility
+
+This project is aimed at Qualcomm Snapdragon systems and Adreno-based GPU environments used in Android emulation and custom GPU stacks. It is designed around the broader Turnip/Freedreno ecosystem, which is widely used in user-space driver injection and emulation workflows.
+
+Useful ecosystem references include:
+- Adreno tools / custom driver communities
+- Mesa Freedreno / Turnip development work
+- Emulation-focused Vulkan driver integrations
+
+---
+
+## Acknowledgments
+
+This project is inspired by the broader work of the upstream Mesa, Freedreno, and Adreno driver communities. Their shared work on upstream graphics stack development, performance optimization, and driver debugging is the foundation of projects like this one.
+
+The repository also stands on the shoulders of earlier driver-sharing efforts and community testing work that made modern Adreno Vulkan experimentation possible.
+
 ---
 
 <details>
-<summary>Turnip v26.2.0 R7 - Features and Changes</summary>
+<summary><strong>Previous release info (kept for reference)</strong></summary>
 
-# Turnip Driver v26.7.0 (Revision 7) 🚀
+## Previous version: Turnip v26.7.0 R7
 
-## 📋 Release Overview
-This release brings Revision 7 of the Turnip v26.7.0 driver stack. Compiled directly from the bleeding-edge upstream Mesa `main` source tree, this update represents a significant leap forward in hardware support, pipeline efficiency, and compatibility with modern PC translation layers on Android.
+### Release overview
+This release brought Revision 7 of the Turnip v26.7.0 driver stack. It was compiled directly from the bleeding-edge upstream Mesa main source tree and represented a significant update for newer Adreno GPU environments.
 
-## 🔄 What Changed: R5 vs. R7
-If you are upgrading directly from Revision 5, here are the major architectural shifts and performance leaps you will notice in R7:
+### What changed in the older R7 cycle
+- Vulkan versioning and extension work continued to move forward
+- Performance tuning improvements were added for command-buffer handling and memory behavior
+- DXVK-related pipeline stalls and compatibility work were addressed
+- Targeted updates helped improve behavior for newer Adreno architectures
 
-* **Vulkan Versioning & Extensions:** The driver remains fully conformant with **Vulkan 1.3**, but R7 aggressively integrates emerging **Vulkan 1.4** core features. This includes critical implementations of `VK_EXT_shader_object` and `VK_KHR_dynamic_rendering_local_read`, vastly reducing CPU overhead during heavy draw calls.
-* **The "Noflushall" Performance Leap:** R7 introduces proper handling for `noflushall` behavior. By bypassing aggressive command buffer flushing, R7 delivers a raw **25% to 40% performance boost** in GPU-bound scenarios compared to R5.
-* **DXVK 2.5+ Synergy:** R7 directly integrates Mesa MR 39751, containing targeted patches that resolve the pipeline compilation stalls previously seen when running DXVK 2.5 and newer. 
-* **Adreno 8xx Enablement:** While R5 primarily stabilized the 700 series, R7 brings fully functional (though experimental) support for the **Snapdragon 8 Elite (Gen 4/5)** architecture, addressing initial GMEM allocation failures on A830 and A840 GPUs.
+### Older feature highlights
+- Upstream synchronization with recent Mesa mainline work
+- Optimized GMEM management and memory efficiency
+- Zink translation refinements for legacy OpenGL-over-Vulkan use cases
+- Stability fixes for overlays, UI rendering, and black-screen initialization issues
 
----
+### Compatibility notes from the previous generation
+- Supported hardware included Adreno 6xx, 7xx, and newer 8xx-focused setups
+- Designed to work with emulation stacks using custom Vulkan driver injection
+- Installation still followed the same pattern: load a packaged ZIP as a custom driver
 
-## ✨ Features & Enhancements
-* **Upstream Synchronization:** Rebased on the absolute latest Mesa `main` commits, capturing real-time upstream shader compiler improvements.
-* **Optimized GMEM Management:** Rewritten tile memory (GMEM) allocation logic for newer architectures, significantly improving memory bandwidth efficiency in high-resolution rendering.
-* **Zink Translation Polish:** Further refined the OpenGL-over-Vulkan translation layer. Legacy OpenGL ES titles now experience fewer micro-stutters during shader cache generation.
-
-## 🐛 Bug Fixes
-* **Overlay & UI Glitches:** Resolved severe screen flickering and texture corruption that occurred when system overlays (like volume sliders or performance monitors) were drawn over active Vulkan surfaces. 
-* **Foliage & Alpha Rendering:** Fixed persistent alpha-to-coverage bugs that caused foliage flickering and rendering artifacts in modern Unreal Engine and Unity titles running through translation layers.
-* **Black Screen of Death:** Addressed an initialization timeout on Adreno 7xx/8xx series that resulted in a black screen with a visible cursor upon booting heavy Windows environments.
-
----
-
-## 📱 Hardware & Software Compatibility
-* **Supported Hardware:** Qualcomm Snapdragon SoCs equipped with **Adreno 6xx**, **Adreno 7xx**, and the new **Adreno 8xx** (Elite) series GPUs. 
-* **Supported Software:** Seamlessly integrates with emulation platforms utilizing `libadrenotools`, including:
-    * GameNative / Eden 
-    * Winlator / GameHub
-    * Yuzu / Sudachi / Suyu
-    * Vita3K
-
-## ⚙️ Installation Instructions
-1. Download the `turnip_v26.7.0_R7.zip` archive attached below. **(Do not extract the ZIP file)**
-2. Open your preferred emulator or translation layer.
-3. Navigate to **Settings > GPU > Custom Driver** (or component manager).
-4. Select **Install / Add New**, choose the downloaded `.zip` file, and ensure it is selected as your active driver. Keep shader caches cleared on the first boot.
-
----
-
-## 🤝 Acknowledgments
-A massive thank you to the upstream Mesa/Freedreno developers (including K11MCH1, StevenMXZ, and MrPurple) and the emulation community for their continuous testing, benchmark reporting, and dedication to pushing the limits of mobile graphics.
+### Older installation flow
+1. Download the archived driver package
+2. Keep the ZIP intact
+3. Open the desired emulator or driver manager
+4. Navigate to GPU or custom driver settings
+5. Install the ZIP and select it as the active driver
+6. Clear shader caches on first run if prompted
 
 </details>
 
 ---
 
-A comprehensive, automated toolset for sharing, building, and distributing the latest upstream Mesa (Turnip/Zink) drivers for Qualcomm Adreno GPUs.
+## License
 
-This project aims to bridge the gap between upstream Linux graphics development and end-user Android emulation/gaming by providing an optimized CI/CD pipeline and local build system for Turnip drivers.
+This project is distributed under the MIT License for the tooling and scripts in the repository.
 
-## 🤝 Acknowledgments & Inspirations
-
-This project stands on the shoulders of giants. It is highly inspired by and deeply grateful to the pioneering work done by:
-* **[StevenMXZ / Adreno-Tools-Drivers](https://github.com/StevenMXZ/Adreno-Tools-Drivers/)**
-* **[K11MCH1 / AdrenoToolsDrivers](https://github.com/K11MCH1/AdrenoToolsDrivers)**
-
-Without their continuous effort to democratize and distribute bleeding-edge Adreno drivers, the landscape of Android gaming and emulation (via Skyline, Strato, Yuzu, Vita3K, etc.) would not be where it is today. Thank you for your immense contributions to the community.
+The compiled driver binaries themselves remain subject to the upstream Mesa and associated component licenses used by the relevant build stack.
 
 ---
 
-## 🧠 Technical Overview & Architecture
+## Project status
 
-Building a graphics driver for Android user-space that effectively intercepts and overrides the system's vendor implementation requires navigating a complex labyrinth of APIs, linking protocols, and hardware architectures.
+This repository is focused on delivering fresh, automated Turnip driver builds while keeping historical notes and older release information available for context and comparison.
 
-### 1. The Freedreno & Turnip Stack
-Qualcomm's Adreno GPUs utilize a Tile-Based Deferred Rendering (TBDR) architecture, distinct from traditional immediate-mode desktop GPUs. Upstream Mesa supports this via the **Freedreno** project. Within Freedreno, **Turnip** is the open-source Vulkan implementation. By utilizing this toolset, we compile Turnip directly from the latest Mesa `main` branch, enabling bug fixes and Vulkan extensions (like `VK_KHR_portability_subset` and dynamic rendering features) months or years before they reach official OEM firmware.
-
-### 2. Bypassing DRM for KGSL
-On standard Linux environments, Mesa interacts with the GPU via the Direct Rendering Manager (DRM) and Kernel Mode Setting (KMS). However, Android devices abstract GPU access through Qualcomm's proprietary **KGSL (Kernel Graphics Support Layer)**. The drivers built via this toolset are compiled with specialized Meson flags that strip out the DRM dependency, substituting it with KGSL bindings. This allows the Turnip driver to communicate directly with the Adreno GPU using Android's native `ioctl` calls without requiring root access.
-
-### 3. User-Space Injection (AdrenoTools)
-Because Android heavily restricts library loading via the Bionic linker (relying on `sphall` namespaces and vendor partitions), we cannot easily overwrite the system `libvulkan.so`. Instead, these drivers are packaged to be consumed by `libadrenotools`. This library works by:
-* Hooking the Android Vulkan loader in user-space.
-* Patching the custom driver ELF headers (e.g., overriding `DT_SONAME`).
-* Redirecting application Vulkan calls into our locally extracted, freshly compiled Turnip driver.
-
-### 4. Zink: OpenGL over Vulkan
-Alongside Turnip, this toolkit can optionally compile **Zink**. By running a highly optimized OpenGL translation layer over our Turnip Vulkan driver, we provide performant, bug-free OpenGL ES and Desktop OpenGL support for legacy translation layers, fully bypassing the notoriously unstable closed-source Adreno OpenGL drivers.
-
----
-
-## 🛠️ Build Toolchain
-
-This repository leverages a robust, scriptable pipeline designed for predictability and performance:
-* **Compiler:** LLVM / Clang (via Android NDK)
-* **Build System:** Meson + Ninja
-* **Target Architectures:** `aarch64`
-* **Optimization:** `-O3`, LTO (Link Time Optimization) where applicable, and `-Bsymbolic` to prevent dynamic symbol interposition overhead.
-
-### Prerequisites
-* Linux environment (Ubuntu 22.04 LTS or Arch Linux recommended)
-* Android NDK (r25c or higher recommended)
-* Python 3.10+, Meson, Ninja, Flex, Bison, `pkg-config`
-
-### Local Compilation
-
-```bash
-# 1. Clone the repository and submodules
-git clone https://github.com/YourName/Adreno-Mesa-Drivers.git
-cd Adreno-Mesa-Drivers
-
-# 2. Set your environment variables
-export NDK_HOME=/path/to/android-ndk
-
-# 3. Run the automated build script
-./build_turnip.sh --release
-```
-
-The build script will:
-1. Fetch the latest Mesa source tree.
-2. Generate a cross-compilation file for Meson targeting `aarch64-linux-android`.
-3. Configure Mesa with `-Dgallium-drivers=freedreno,zink`, `-Dvulkan-drivers=freedreno`, and `-Dfreedreno-kmds=kgsl`.
-4. Compile the target `libvulkan_freedreno.so`.
-5. Package the resulting binary, alongside the required `meta.json`, into a flashable/loadable `.zip` archive.
-
----
-
-## 🚀 CI/CD Pipeline
-
-This repository includes GitHub Actions workflows (`.github/workflows/build.yml`) that automatically pull the latest Mesa commits, build the driver matrix, and publish release artifacts.
-
-Developers simply need to fork the repository, enable GitHub Actions, and watch the bleeding-edge drivers roll into the "Releases" tab.
-
-## 📜 License
-
-The build scripts and tools in this repository are provided under the MIT License.
-
-*Note: The resulting driver binaries are subject to the upstream Mesa license (MIT / X11), and the Android NDK components are subject to their respective Google licenses.*
+The latest R29 auto-build direction keeps the project aligned with rapid upstream Mesa development while preserving the earlier release history as a reference point.
