@@ -1,8 +1,15 @@
-# Build and Compilation Artifacts
+# Build scratch: Mesa checkout, NDK, meson/ninja output, packaged ZIPs.
+# Everything here is reproducible from build_turnip.sh and must never be
+# committed -- the previous revision tracked tu_gen8*.patch by accident.
+turnip_workdir/
+workdir/
+
+# Build and compilation artifacts
 build/
 out/
 target/
 bin/
+dist/
 
 # Meson and Ninja specific
 .ninja_deps
@@ -11,12 +18,12 @@ compile_commands.json
 meson-logs/
 meson-private/
 
-# Downloaded Source Code and NDKs
+# Downloaded source code and NDKs
 mesa/
 android-ndk-*/
 ndk/
 
-# Archives, Binaries, and Packages
+# Archives, binaries, and packages
 *.zip
 *.tar.gz
 *.tar.xz
@@ -24,7 +31,16 @@ ndk/
 *.so
 *.apk
 
-# IDE and System specific
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+venv/
+.venv/
+
+# IDE and system specific
 .vscode/
 .idea/
 *.swp
@@ -32,7 +48,7 @@ ndk/
 .DS_Store
 Thumbs.db
 
-# Environment and Secrets
+# Environment and secrets
 .env
 local.properties
 *.log
