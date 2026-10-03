@@ -22,12 +22,14 @@ Every nightly build publishes one ZIP per variant plus a `SHA256SUMS.txt`.
 Package names carry everything needed to identify a build later:
 
 ```
-Turnip_A8xx-Patched-Patchs1_mesa26.2.0-devel_vk1.4.348_R1842_1a2b3c4d5e6f.zip
+Turnip_A8xx-Patched-Patchs1_mesa<version>_vk<version>_R<build>_<commit>.zip
          └─── variant ───────┘ └─ Mesa ─┘ └ VK ┘ └build┘ └── commit ──┘
 ```
 
-The Mesa version, Vulkan version and commit are read from the tree that was
-actually compiled, so a release can never claim a version it does not contain.
+The version and commit segments are filled in from the tree that was actually
+compiled, never from a constant in the build script. That is the whole point of
+the format: a release cannot claim a version it does not contain, and two
+nightlies are always distinguishable by name alone.
 
 ### Installing
 
