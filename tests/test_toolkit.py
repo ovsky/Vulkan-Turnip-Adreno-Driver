@@ -109,6 +109,37 @@ def _git_available() -> bool:
         return False
 
 
+def _bash_path() -> str | None:
+    """Locate a bash that can actually parse this project's script, or None.
+
+    Probing with a real script rather than a trivial command matters on
+    Windows: 'bash' on PATH is the WSL launcher, which exists but will not run a
+    script at a Windows path, so tests against it would fail confusingly instead
+    of skipping.
+    """
+    probe = os.path.join(REPO_ROOT, "build_turnip.sh")
+    candidates = ["bash"]
+    if os.name == "nt":
+        candidates = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            "bash",
+        ]
+    for cand in candidates:
+        try:
+            proc = subprocess.run(
+                [cand, "-n", probe], capture_output=True, text=True, timeout=60
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode == 0:
+            return cand
+    return None
+
+
+BASH = _bash_path()
+
+
 class TestMesaFacts(unittest.TestCase):
     def test_vulkan_version_from_complete_modern(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -660,6 +691,132 @@ class TestVerifyPackage(unittest.TestCase):
             path = self._zip(os.path.join(tmp, "d.zip"))
             args = self._args(path, expect_package_version="99")
             self.assertEqual(verify_package.verify(path, args), 1)
+
+
+@unittest.skipIf(BASH is None, "bash not available")
+class TestBuildScriptCli(unittest.TestCase):
+    """The build script's own argument handling.
+
+    These are the paths a user hits before any toolchain exists, so they have to
+    work on a bare machine -- including Windows contributors who can only lint.
+    """
+
+    SCRIPT = os.path.join(REPO_ROOT, "build_turnip.sh")
+
+    def run_script(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [BASH, self.SCRIPT, *args],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            timeout=180,
+        )
+
+    def test_syntax_is_valid(self):
+        proc = subprocess.run(
+            [BASH, "-n", self.SCRIPT], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_list_names_every_variant(self):
+        proc = self.run_script("--list")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        listed = proc.stdout.split()
+        self.assertEqual(
+            sorted(listed), ["a7xx", "a7xx-oneui", "a8xx-patchs1", "a8xx-patchs2"]
+        )
+
+    def test_help_documents_every_flag_the_parser_accepts(self):
+        """Guards against a flag existing but being undocumented.
+
+        Also guards the inverse: usage() reads the script's own header comment,
+        so an over-wide line range once printed four lines of shell code in
+        --help. That is easy to reintroduce and ugly to notice.
+        """
+        proc = self.run_script("--help")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        help_text = proc.stdout
+
+        for flag in ("--list", "--all", "--variant", "--dry-run",
+                     "--print-config", "--help"):
+            self.assertIn(flag, help_text, f"{flag} is undocumented in --help")
+
+        leaked = [
+            line for line in help_text.splitlines()
+            if line.startswith("set -euo")
+            or line.startswith(("REPO_ROOT=", "SCRIPTS_DIR=", "PATCHES_DIR=",
+                                "MANIFEST=", "usage()", "variant_field()"))
+        ]
+        self.assertEqual(leaked, [], f"--help leaked script code: {leaked}")
+
+    def test_rejects_unknown_variant(self):
+        proc = self.run_script("--variant", "definitely-not-a-variant")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("unknown variant", (proc.stdout + proc.stderr).lower())
+
+    def test_rejects_unknown_argument(self):
+        proc = self.run_script("--turbo")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("unknown argument", (proc.stdout + proc.stderr).lower())
+
+    def test_dry_run_all_succeeds_without_a_toolchain(self):
+        """--dry-run has to work where nothing is installed, and above all must
+        not reach a patch step: `patch -p1` from the repository root would try to
+        edit *this* repository and start prompting."""
+        proc = self.run_script("--all", "--dry-run")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        for variant in ("a7xx", "a7xx-oneui", "a8xx-patchs2", "a8xx-patchs1"):
+            self.assertIn(variant, proc.stdout)
+        self.assertNotIn("File to patch", proc.stdout + proc.stderr)
+
+    def test_dry_run_changes_nothing_on_disk(self):
+        def snapshot() -> set[tuple[str, int]]:
+            out = set()
+            for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
+                dirnames[:] = [
+                    d for d in dirnames
+                    if d not in (".git", "__pycache__", "turnip_workdir")
+                ]
+                for name in filenames:
+                    p = os.path.join(dirpath, name)
+                    try:
+                        out.add((p, os.path.getsize(p)))
+                    except OSError:
+                        pass
+            return out
+
+        before = snapshot()
+        self.assertEqual(self.run_script("--all", "--dry-run").returncode, 0)
+        after = snapshot()
+        self.assertEqual(
+            sorted(os.path.relpath(p, REPO_ROOT) for p, _ in after - before),
+            [],
+            "dry run created or modified files",
+        )
+
+    def test_print_config_resolves_the_manifest(self):
+        proc = self.run_script("--print-config")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        config = dict(
+            line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line
+        )
+        self.assertEqual(
+            config["mesa_repo"], "https://gitlab.freedesktop.org/mesa/mesa.git"
+        )
+        self.assertEqual(config["mesa_ref"], "main")
+        self.assertEqual(config["variants"], "a8xx-patchs1")
+        for key in ("workdir", "ndk", "platform_sdk", "min_api", "lto",
+                    "build_version"):
+            self.assertIn(key, config)
+
+    def test_env_override_wins_over_the_manifest(self):
+        env = dict(os.environ, MESA_REF="some-other-branch")
+        proc = subprocess.run(
+            [BASH, self.SCRIPT, "--print-config"],
+            capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=180,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("mesa_ref=some-other-branch", proc.stdout)
 
 
 if __name__ == "__main__":
