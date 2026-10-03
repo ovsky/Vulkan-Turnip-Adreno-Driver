@@ -1,0 +1,103 @@
+name: Sync community sources
+
+# =============================================================================
+# Watches the community driver projects recorded in upstreams.yml and raises an
+# issue when one of them moves.
+#
+# Why this exists: "we merge the community's fixes" is only true if somebody
+# notices when the community publishes new ones. Without this, patches/ quietly
+# rots and the releases keep shipping the same fixes while everyone else has
+# moved on. It reports; it does not auto-merge, because reviewing a new GPU
+# patch is a human decision.
+# =============================================================================
+
+on:
+  schedule:
+    # Twice weekly, off the hour so it does not pile onto every other repo's
+    # 00:00 cron stampede.
+    - cron: '41 6 * * 1,4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Check upstream drift
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python3 -m pip install --break-system-packages pyyaml
+
+      - name: Compare recorded heads against remotes
+        id: scan
+        run: |
+          set -euo pipefail
+          python3 scripts/check_upstreams.py --json > upstream-status.json
+          cat upstream-status.json
+
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          data = json.load(open("upstream-status.json"))
+          interesting = {"moved", "unpinned", "unreachable", "incomplete"}
+          drifted = [f["id"] for f in data["findings"] if f["status"] in interesting]
+          print("drifted=" + ",".join(drifted))
+          print("has_drift=" + ("true" if drifted else "false"))
+          PY
+
+      - name: Publish findings
+        if: steps.scan.outputs.has_drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The label may not exist on a fresh fork; create it rather than fail
+          # the whole run when trying to open the tracking issue.
+          gh label create upstream-drift \
+            --description "An upstream community driver source has new commits" \
+            --color "d93f0b" 2>/dev/null || true
+
+          python3 scripts/check_upstreams.py > upstream-table.md
+
+          {
+            cat upstream-table.md
+            echo
+            echo "### What to do"
+            echo
+            echo "1. Review what changed in each source above."
+            echo "2. For \`stevenmxz\`, diff the \`A8xx\` branch against the last imported state"
+            echo "   and import any new patches into \`patches/\`."
+            echo "3. Update the \`observed_head\` values in \`upstreams.yml\` once merged."
+            echo "4. Update \`docs/PATCHES.md\` so attribution stays accurate."
+            echo "5. Open a PR. CI builds every variant and verifies the packages."
+          } > body.md
+
+          TITLE="Upstream Adreno driver sources have moved ($(date -u +%Y-%m-%d))"
+
+          # Update the open issue if there is one, so this stays a single
+          # rolling thread instead of a new issue every two days.
+          EXISTING=$(gh issue list --label upstream-drift --state open \
+                       --limit 1 --json number --jq '.[0].number' || true)
+
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            gh issue edit "$EXISTING" --title "$TITLE" --body-file body.md
+            echo "updated issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body-file body.md \
+                            --label upstream-drift
+          fi
+        shell: bash
+
+      - name: Upload status snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-status
+          path: upstream-status.json
+          retention-days: 30
