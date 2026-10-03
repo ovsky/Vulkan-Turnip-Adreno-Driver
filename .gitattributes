@@ -29,8 +29,12 @@
 *.txt  text eol=lf
 *.json text eol=lf
 
-Makefile  text eol=lf
-LICENSE   text eol=lf
+Makefile       text eol=lf
+LICENSE        text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+CHANGELOG.md   text eol=lf
+README.md      text eol=lf
 
 # Never line-ending-convert binaries.
 *.zip binary
