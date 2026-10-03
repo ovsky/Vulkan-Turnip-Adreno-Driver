@@ -122,7 +122,14 @@ variant_field() {
 }
 
 usage() {
-    sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Print the leading comment block as the help text. Walking to the first
+    # non-comment line rather than a hardcoded line range means editing the
+    # header above can never make --help spill the first few lines of code.
+    awk '
+        NR == 1 && /^#!/ { next }
+        /^#/      { sub(/^# ?/, ""); print; next }
+        { exit }
+    ' "${BASH_SOURCE[0]}"
     cat <<'EOF'
 
 Options:
@@ -130,6 +137,7 @@ Options:
   --all                  build every variant sequentially
   -v, --variant NAME     build a single variant
   --dry-run              print the plan and exit without touching anything
+  --print-config         print the fully resolved configuration and exit
   -h, --help             this text
 
 Variants:
