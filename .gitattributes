@@ -1,2 +1,46 @@
-# Auto detect text files and perform LF normalization
+# Normalise line endings.
+#
+# This repository's build inputs are byte-sensitive in a way a typical project
+# is not:
+#
+#   * a CRLF shebang makes the Linux CI runner fail with
+#     "/usr/bin/env^M: bad interpreter";
+#   * a CRLF patch file does not apply, because its context lines no longer
+#     match Mesa's LF sources, and `patch --fuzz` cannot bridge a carriage
+#     return;
+#   * Python with a stray CR still parses, but diffs and assertions get noisy.
+#
+# core.autocrlf is a *local* setting, so a Windows contributor can silently
+# commit CRLF regardless of what this file says unless the file is explicit.
+# Pinning eol=lf per type makes the repository behave the same for everyone.
+
 * text=auto
+
+*.sh   text eol=lf
+*.bash text eol=lf
+*.py   text eol=lf
+*.patch text eol=lf
+*.diff text eol=lf
+*.c    text eol=lf
+*.h    text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.json text eol=lf
+
+Makefile       text eol=lf
+LICENSE        text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+CHANGELOG.md   text eol=lf
+README.md      text eol=lf
+
+# Never line-ending-convert binaries.
+*.zip binary
+*.so   binary
+*.apk  binary
+*.png  binary
+*.jpg  binary
+*.gz   binary
+*.so.* binary

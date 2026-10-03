@@ -1,0 +1,9 @@
+# Development-only Python dependencies.
+#
+# The driver build itself needs no Python packages beyond `mako`, which Mesa
+# itself requires; these are for linting and testing this repository.
+#
+#     python3 -m pip install -r requirements-dev.txt
+#     python3 -m unittest discover -s tests -v
+
+PyYAML>=6.0

@@ -1,0 +1,200 @@
+# =============================================================================
+# upstreams.yml - Community Adreno driver source manifest
+# =============================================================================
+# Single source of truth for every driver source this project merges fixes
+# from. Two consumers read this file:
+#
+#   1. build_turnip.sh            -> resolves the Mesa base revision to build
+#   2. .github/workflows/sync-community-sources.yml -> weekly drift check
+#
+# Provenance rules for this project:
+#   - Every fix shipped in a release must be traceable to an entry below.
+#   - "role" declares how we consume a source:
+#       base        the code we compile
+#       patches     portable patches applied on top of base
+#       reference   fixes observed there; merged by hand when they land here
+#       validation  binary/QA signal only, nothing is compiled from it
+#   - "availability" is deliberately honest. A source that ships fixes only
+#     inside closed binaries is recorded as `binary-only` so we never claim
+#     to merge something we cannot see.
+#
+# Validate after editing:  python3 -c "import yaml,sys;yaml.safe_load(open('upstreams.yml'))"
+# =============================================================================
+
+schema_version: 1
+
+# -----------------------------------------------------------------------------
+# base: the Mesa tree we actually compile
+# -----------------------------------------------------------------------------
+base:
+  id: mesa-upstream
+  repo: https://gitlab.freedesktop.org/mesa/mesa.git
+  ref: main
+  role: base
+  availability: public
+  license: MIT
+  # Resolve the head SHA once per run so every variant in a release is built
+  # from the *same* commit. Never let variants drift apart silently.
+  pin_per_run: true
+  # We deliberately always want the newest Mesa, so movement here is the
+  # point rather than a problem. The tracker reports it for information and
+  # does not raise drift.
+  drift_expected: true
+  # Recorded 2026-10-03. Informational only.
+  observed_head: 3821bf78426f5515d26047e49164beedb8ecd18d
+  notes: >-
+    Upstream Mesa mainline. The Adreno 8xx/gen8 driver work by Rob Clark
+    (Qualcomm) has landed upstream, so building from mainline plus our patch
+    overlay keeps us current without depending on a personal fork that stops
+    being updated. This is the reason we deliberately do NOT build from
+    whitebelyash/mesa-tu8 as the base; see sources.fork-mesa-tu8.
+
+# -----------------------------------------------------------------------------
+# sources: community projects we merge fixes from
+# -----------------------------------------------------------------------------
+sources:
+
+  # -- StevenMXZ: the main patch provider ------------------------------------
+  - id: stevenmxz
+    name: StevenMXZ / Adreno-Tools-Drivers
+    url: https://github.com/StevenMXZ/Adreno-Tools-Drivers
+    ref: A8xx
+    role: patches
+    availability: public
+    license: GPL-3.0
+    # Head observed 2026-10-03. The sync workflow compares against this and
+    # raises drift when a new patch lands upstream.
+    observed_head: b3b32ad30e7d7b4bd897e678af064036eeb9df09
+    imported:
+      - patches/patchs1/
+      - patches/patchs2/
+      - patches/a7xx/8g2_ui_glitch.patch
+    fixes:
+      - "KGSL syncobj timestamp->fd merged instead of duplicated (correctness)"
+      - "Cube-map direction sanitisation on A8xx (removes cube_coord_hang_quirk)"
+      - "Bindless descriptor invalidation through the A8xx path"
+      - "KGSL index-buffer/VBO aliasing flag on A8xx"
+      - "KGSL zero-timeout poll returns VK_TIMEOUT instead of spinning"
+      - "VK_EXT_mesh_shader emulated with compute"
+      - "ir3: required subgroup size of half a warp"
+      - "A8xx command streams fetched through a virtual file"
+      - "Cache retired A8xx IB storage"
+      - "AIMapper gralloc backend + UBWC swapchain usage bit"
+      - "A7xx has_early_preamble=False + scalar predicates quirk"
+      - "A8xx gen8 stack, A825/A830/A840v2 device entries, 32->64 KiB shared mem"
+      - "8g2 OneUI overlay/glitch fix for A7xx"
+    notes: >-
+      Primary patch provider. build_turnip.sh applies this tree and then
+      asserts each fix is actually present in the source before compiling, so
+      a silently-dropped patch fails the build instead of shipping.
+
+  # -- StevenMXZ's Mesa fork: fixes that predate the patch set -----------------
+  - id: fork-mesa-tu8
+    name: whitebelyash / mesa-tu8  (StevenMXZ's Mesa fork)
+    url: https://github.com/whitebelyash/mesa-tu8
+    ref: gen8
+    role: reference
+    availability: public
+    license: MIT
+    observed_head: d185f62a24305a2ea0d2fa7f3d156e0595025d54
+    last_commit_date: 2026-04-25
+    branches_worth_knowing:
+      - { ref: gen8,           note: "newest; superset used by this project's earlier builds" }
+      - { ref: gen8-clean,     note: "drm-shim 810/825/829, A825, disable_gmem, UBWC gralloc" }
+      - { ref: gen8-legacy,    note: "A710/A720 support, KGSL IB caching, timeline-semaphore emulation" }
+      - { ref: "wip/squash",   note: "squashed variant of gen8, same fixes" }
+      - { ref: gen8-hacks,     note: "aggressive; logs gralloc buffer magic" }
+      - { ref: gen8-revert,    note: "MUTABLEEN gen8 fixup reverted" }
+      - { ref: gen8-yuck,      note: "TU_DRAW_STATE_VB size fix reverted" }
+      - { ref: gen8-old,       note: "stale" }
+    fixes_merged:
+      - "Adreno 710/720 support (with Vauzi-17)"
+      - "drm-shim entries for Adreno 810/825/829 (the shim emulators need)"
+      - "Enable A825"
+      - "A8xx family config refresh (DVD/DiskDVD)"
+      - "Disable selected A810 features (DVD/DiskDVD)"
+      - "u_gralloc: always take the UBWC detection path"
+      - "disable_gmem GPU property so gmem can be turned off per-GPU"
+      - "adrenotools-specific driver versioning in the device name"
+      - "KGSL UBWC_5 / UBWC_6 support"
+      - "Remove unconditional TU_DEBUG_FLUSHALL on a8xx (upstream Zan Dobersek)"
+      - "TU_DECK_EMU so Steam games detect a handheld (upstream MR 38808)"
+    notes: >-
+      Kept as reference and for archaeology, NOT as the build base. Last push
+      2026-04-25, so it goes stale relative to Mesa mainline. Everything we
+      still want from it is either upstream now or captured in patches/.
+
+  # -- MrPurple: validation signal, not a code source -------------------------
+  - id: mrpurple
+    name: MrPurple666 / purple-turnip
+    url: https://github.com/MrPurple666/purple-turnip
+    ref: main
+    role: validation
+    availability: public
+    license: unspecified
+    observed_head: f8de3456d423fff7683377cc32291ba77e4371fc
+    tracked_release: vturnip_mrpurple_T30-toasted.adpkg
+    fixes_reported:
+      - "Upstream to latest Mesa source"
+      - "A6xx / A7xx support corrections over T-29"
+      - "810/825/829 drm-shim entries            -> already merged via fork-mesa-tu8"
+      - "A710/A720 usable without gmem           -> already merged via fork-mesa-tu8"
+      - "A730 device entries and corrections     -> already merged via fork-mesa-tu8"
+      - "PurpleVK: A6xx Vulkan 1.4 exposure patch -> NOT PUBLIC, cannot merge"
+    notes: >-
+      Ships a well-regarded unified A6xx/A7xx/A8xx driver, but publishes no
+      patch series. Their public CI (MrPurple666/freedreno-CI) predates the
+      current Mesa layout: it downloads mesa-main.zip from gitlab, uses NDK
+      r25c / API 31 and carries no community patches at all. We therefore
+      treat MrPurple as a validation/QA reference and take their fixes through
+      the projects that did publish them. PurpleVK is only distributed inside
+      their binaries and is deliberately listed as unmergeable.
+
+  # -- K11MCH1: distribution + vendor driver extraction -----------------------
+  - id: k11mch1
+    name: K11MCH1 / AdrenoToolsDrivers
+    url: https://github.com/K11MCH1/AdrenoToolsDrivers
+    ref: main
+    role: validation
+    availability: binary-only
+    license: unspecified
+    observed_head: 278cdc7522e0873fed1e3aa963539a0c374c7862
+    tracked_release: v840
+    fixes_reported:
+      - "Vendor Qualcomm driver extracted from Quest 3 (v837, Vulkan 1.3.295)"
+      - "Vendor Qualcomm driver extracted from Meta Ray-Ban Display (v840)"
+    notes: >-
+      A distribution repository: it republishes StevenMXZ/MrPurple-derived
+      builds and adds vendor drivers unpacked from Quest hardware, crediting
+      Hugo and StevenMX. No portable source patches, so nothing is merged
+      from it; it is tracked because its Quest/Ray-Ban driver notes are the
+      best public signal we have for what real A7xx/A8xx silicon needs.
+
+# -----------------------------------------------------------------------------
+# people: attribution for individual fixes, so releases can credit correctly
+# -----------------------------------------------------------------------------
+people:
+  - name: Rob Clark
+    org: Qualcomm / Mesa
+    contribution: "Adreno 8xx (gen8) driver base, KGSL UBWC_5/UBWC_6"
+  - name: StevenMXZ
+    org: whitebelyash
+    contribution: "gen8 branches, Android/Bionic packaging, A7xx/A8xx patch sets"
+  - name: K11MCH1
+    org: AdrenoToolsDrivers
+    contribution: "packaging, Quest 3 / Ray-Ban vendor driver extraction"
+  - name: MrPurple666
+    org: purple-turnip
+    contribution: "unified A6xx/A7xx/A8xx driver, QA and issue triage"
+  - name: DiskDVD
+    org: mesa-tu8
+    contribution: "A8xx family config refresh, A810 feature gating"
+  - name: Vauzi-17
+    org: community
+    contribution: "Adreno 710/720 support"
+  - name: Karmjit Mahil
+    org: Collabora / Mesa
+    contribution: "TU_DECK_EMU (upstream MR 38808)"
+  - name: Hugo
+    org: community
+    contribution: "Quest 3 vendor driver extraction (via K11MCH1)"
