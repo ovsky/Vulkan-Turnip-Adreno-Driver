@@ -33,9 +33,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - LTO (`-Db_lto=true`), `-Dllvm=disabled` for cross-compile determinism, and
   optional ccache support.
 - `SHA256SUMS.txt` alongside every published package.
-- 44 unit tests covering release naming, manifest validation, drift detection,
-  the D32S8 edit, step-skipping semantics and every package failure mode.
+- 55 unit tests covering release naming, manifest validation, drift detection,
+  the D32S8 edit, step-skipping semantics, every package failure mode, and the
+  build script's own argument handling.
+- `--print-config`, which reports the fully resolved Mesa base, NDK, target SDK
+  and patch configuration without building anything.
 - `docs/PATCHES.md`: per-patch catalogue, provenance and attribution.
+- `patches/README.md`: tier layout, the required-versus-optional policy, and why
+  each file under `patches/legacy/` is dead.
 
 ### Changed
 
@@ -52,9 +57,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   number and commit, instead of `a8xx-gen8-V<run>.zip`.
 - CI resolves one Mesa commit per run and pins every variant to it.
 - Dependency check names each missing tool and prints the install command.
+- `.gitattributes` pins LF for shell scripts, patches, Python and YAML. A CRLF
+  shebang fails on the Linux runner, and a CRLF patch does not apply at all,
+  because its context lines stop matching Mesa's LF sources.
 
 ### Fixed
 
+- `--help` printed four lines of shell code. `usage()` read the header comment
+  with a hardcoded `sed -n '2,40p'` while the block ends at line 35; it now
+  walks to the first non-comment line, so editing the header cannot change the
+  help output. `--print-config` is documented too.
+- `--dry-run` ran `patch` from the repository root for two of the patch stages
+  that had no dry-run guard. From the wrong directory that prompts to modify
+  *this* repository's files. Every patch stage is now guarded, and a test
+  asserts `--dry-run --all` leaves the working tree byte-identical.
+- `--dry-run` no longer requires a Linux toolchain, an NDK or a Mesa checkout,
+  so the plan can be inspected anywhere — including by a Windows contributor.
+- `--dry-run` reports missing dependencies instead of aborting.
 - `.github/workflows/build.yml` never ran: the workflow lived at the repository
   root as `build.yml`, where GitHub ignores it. The only live workflow,
   `turnip_build.yml`, omitted `ccache` while the cross-file required it, so the
@@ -66,6 +85,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   replaced the autotuner.
 - Freedreno device tables are syntax-checked after patching rather than
   failing later inside the build.
+- NDK clang warning suppressions are restored to the cross-file. Mesa builds
+  against its own `android_stub` headers, which do not match Bionic and which
+  the NDK diagnoses more strictly than the desktop GCC Mesa normally uses.
 
 ### Removed
 
@@ -86,3 +108,5 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   exist, attributed the driver to `stevenmx` for code the project had not
   merged, and asserted a "25% to 40% performance boost" that was never
   measured. Those claims are removed.
+- The package-name example uses placeholders rather than concrete versions, so
+  it cannot be mistaken for a claim about any particular build.
