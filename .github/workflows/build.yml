@@ -69,6 +69,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install Python lint deps
+        run: |
+          set -euo pipefail
+          python3 -m pip install --break-system-packages --disable-pip-version-check pyyaml
+
       - name: Check shell syntax
         run: |
           set -euo pipefail
