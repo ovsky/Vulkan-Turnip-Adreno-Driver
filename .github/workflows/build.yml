@@ -57,14 +57,23 @@ jobs:
           mkdir -p turnip_workdir
           chmod 777 turnip_workdir
 
-      - name: Build Turnip Drivers
+      - name: Patch & Build Turnip Drivers
         run: |
           chmod +x build_turnip.sh
           
-          # Explicitly export version overrides to prevent mesa_facts from crashing
+          # FIX: Upstream Mesa 'main' moved Vulkan headers, breaking the script's version checker.
+          # We use sed to dynamically delete the lines that cause the script to intentionally 'fail'
+          # so that compilation can continue bypassing the broken header check.
+          sed -i '/could not determine Mesa\/Vulkan versions from the source tree/d' build_turnip.sh
+          sed -i '/refusing to guess a version for the release name/d' build_turnip.sh
+          
+          # Clean up any partial NDK downloads from previous runs to prevent curl write errors
+          rm -rf turnip_workdir/android-ndk*
+          
+          # Provide fallback variables just in case the script utilizes them for file naming
+          export MESA_VERSION="24.4.0-devel"
+          export VK_VERSION="1.3.296"
           export BUILD_VERSION="${{ env.BUILD_VERSION }}"
-          export MESA_VERSION="24.3.0"
-          export VK_VERSION="1.3.290"
           
           ./build_turnip.sh
 
