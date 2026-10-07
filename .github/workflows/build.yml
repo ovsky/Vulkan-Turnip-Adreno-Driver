@@ -54,14 +54,18 @@ jobs:
 
       - name: Prepare Build Directory
         run: |
-          # Create and grant full permissions to the workdir expected by build_turnip.sh
           mkdir -p turnip_workdir
           chmod 777 turnip_workdir
 
       - name: Build Turnip Drivers
         run: |
           chmod +x build_turnip.sh
+          
+          # Explicitly export version overrides to prevent mesa_facts from crashing
           export BUILD_VERSION="${{ env.BUILD_VERSION }}"
+          export MESA_VERSION="24.3.0"
+          export VK_VERSION="1.3.290"
+          
           ./build_turnip.sh
 
       - name: Locate and Verify Build Output
