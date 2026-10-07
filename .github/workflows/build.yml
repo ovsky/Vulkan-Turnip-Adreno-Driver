@@ -1,4 +1,4 @@
-name: Build Latest Experimental Turnip Drivers
+name: Build & Release Experimental Turnip Drivers
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ env:
 
 jobs:
   build:
-    name: Build & Release Turnip Drivers
+    name: Build & Release Experimental Turnip Drivers
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 
@@ -26,74 +26,142 @@ jobs:
           fetch-depth: 0
 
       # ============================================================
-      # Free runner disk space
+      # Prepare runner storage
       #
-      # GitHub-hosted runners have limited SSD space. Turnip/Mesa
-      # builds can use several GB during NDK download + compilation.
-      # These directories contain tools that are not required by the
-      # Turnip build and are safe to remove on a disposable runner.
+      # IMPORTANT:
+      # Do NOT remove /usr/local/lib/android.
+      # Ubuntu 24.04 already contains Android NDK r29 and the build
+      # script expects android-ndk-r29 inside turnip_workdir.
       # ============================================================
-      - name: Prepare Build Storage
+      - name: Prepare Build Environment
         shell: bash
         run: |
           set -Eeuo pipefail
 
           echo "=========================================="
-          echo " Disk space BEFORE cleanup"
+          echo " Runner information"
           echo "=========================================="
-          df -h /
+
+          echo "OS:"
+          lsb_release -a 2>/dev/null || true
+
           echo
+          echo "Kernel:"
+          uname -a
 
-          echo "Removing unnecessary preinstalled toolchains..."
+          echo
+          echo "Disk space BEFORE cleanup:"
+          df -h /
 
-          # Large preinstalled toolchains not required by Turnip.
+          echo
+          echo "=========================================="
+          echo " Freeing unnecessary runner storage"
+          echo "=========================================="
+
+          # These are not required by the Turnip build.
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /opt/ghc || true
           sudo rm -rf /usr/local/share/powershell || true
           sudo rm -rf /opt/hostedtoolcache/CodeQL || true
 
-          # Preinstalled Android SDK/NDK is not used by build_turnip.sh;
-          # the required Android NDK r29 is downloaded explicitly by it.
-          sudo rm -rf /usr/local/lib/android || true
-
-          # Remove Docker images/cache if present.
+          # Docker cache/images are unnecessary for this build.
           if command -v docker >/dev/null 2>&1; then
             sudo docker system prune -af --volumes || true
           fi
 
-          # Remove package-manager caches.
+          # Clean package-manager caches.
           sudo apt-get clean || true
-          sudo rm -rf /var/lib/apt/lists/* || true
 
-          # Remove runner/user caches that are not needed for this build.
+          # Clean user cache only.
           rm -rf "${HOME}/.cache" || true
 
           sync
 
           echo
-          echo "=========================================="
-          echo " Disk space AFTER cleanup"
-          echo "=========================================="
+          echo "Disk space AFTER cleanup:"
           df -h /
 
+      # ============================================================
+      # Use GitHub's preinstalled Android NDK r29
+      # ============================================================
+      - name: Configure Android NDK r29
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo " Configuring Android NDK r29"
+          echo "=========================================="
+
+          # GitHub's Ubuntu 24.04 image exposes NDK r29 through
+          # ANDROID_NDK_LATEST_HOME.
+          NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-}"
+
+          if [[ -z "${NDK_ROOT}" ]]; then
+            echo "::error::ANDROID_NDK_LATEST_HOME is not defined."
+            exit 1
+          fi
+
+          if [[ ! -d "${NDK_ROOT}" ]]; then
+            echo "::error::Android NDK directory does not exist:"
+            echo "        ${NDK_ROOT}"
+            exit 1
+          fi
+
+          echo "System NDK:"
+          echo "${NDK_ROOT}"
+
           echo
-          echo "Filesystem:"
-          df -B1 / | tail -n 1
+          echo "NDK contents:"
+          ls -la "${NDK_ROOT}" | head -n 20
 
-          AVAILABLE_KB=$(df --output=avail / | tail -n 1 | tr -d ' ')
+          LLVM_BIN="${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
-          # Require at least 7 GB free before starting the build.
-          REQUIRED_KB=$((7 * 1024 * 1024))
+          if [[ ! -x "${LLVM_BIN}/clang" ]]; then
+            echo "::error::NDK clang was not found:"
+            echo "        ${LLVM_BIN}/clang"
+            exit 1
+          fi
 
-          if (( AVAILABLE_KB < REQUIRED_KB )); then
-            echo "::error::Not enough free disk space."
-            echo "Available: ${AVAILABLE_KB} KB"
-            echo "Required:  ${REQUIRED_KB} KB"
+          if [[ ! -x "${LLVM_BIN}/llvm-strip" ]]; then
+            echo "::error::NDK llvm-strip was not found:"
+            echo "        ${LLVM_BIN}/llvm-strip"
             exit 1
           fi
 
           echo
-          echo "Enough disk space is available for the Turnip build."
+          echo "Clang:"
+          "${LLVM_BIN}/clang" --version | head -n 1
+
+          echo
+          echo "LLVM strip:"
+          "${LLVM_BIN}/llvm-strip" --version | head -n 1
+
+          # The existing build_turnip.sh expects exactly:
+          #
+          #   turnip_workdir/android-ndk-r29
+          #
+          # Create a symlink instead of downloading/extracting another
+          # ~600 MB NDK archive.
+          mkdir -p turnip_workdir
+
+          rm -rf turnip_workdir/android-ndk-r29
+
+          ln -s "${NDK_ROOT}" \
+            turnip_workdir/android-ndk-r29
+
+          echo
+          echo "Configured:"
+          ls -ld turnip_workdir/android-ndk-r29
+
+          echo
+          echo "Resolved NDK:"
+          readlink -f turnip_workdir/android-ndk-r29
+
+          echo
+          echo "=========================================="
+          echo " NDK configuration complete"
+          echo "=========================================="
 
       # ============================================================
       # Dependencies
@@ -104,7 +172,7 @@ jobs:
           set -Eeuo pipefail
 
           echo "=========================================="
-          echo " Checking build tools"
+          echo " Checking build dependencies"
           echo "=========================================="
 
           command -v git
@@ -119,38 +187,45 @@ jobs:
           command -v curl
 
           echo
-          echo "Git:      $(git --version)"
-          echo "Python:   $(python3 --version)"
-          echo "Pip:      $(python3 -m pip --version)"
-          echo "Ninja:    $(ninja --version)"
-          echo "Patchelf: $(patchelf --version | head -n 1)"
+          echo "Git:"
+          git --version
 
-          # Only install glslang when it is genuinely missing.
+          echo
+          echo "Python:"
+          python3 --version
+
+          echo
+          echo "Pip:"
+          python3 -m pip --version
+
+          echo
+          echo "Ninja:"
+          ninja --version
+
+          echo
+          echo "Patchelf:"
+          patchelf --version | head -n 1
+
+          # glslangValidator may already be installed on the runner.
+          # Only use APT when it is actually missing.
           if ! command -v glslangValidator >/dev/null 2>&1; then
             echo
             echo "glslangValidator is missing."
             echo "Installing glslang-tools..."
 
-            if ! sudo apt-get \
+            sudo apt-get \
               -o Acquire::Retries=3 \
               -o Acquire::http::Timeout=20 \
               -o Acquire::https::Timeout=20 \
-              install -y --no-install-recommends glslang-tools; then
+              update
 
-              echo "Refreshing package lists..."
-
-              sudo apt-get \
-                -o Acquire::Retries=3 \
-                -o Acquire::http::Timeout=20 \
-                -o Acquire::https::Timeout=20 \
-                update
-
-              sudo apt-get \
-                -o Acquire::Retries=3 \
-                -o Acquire::http::Timeout=20 \
-                -o Acquire::https::Timeout=20 \
-                install -y --no-install-recommends glslang-tools
-            fi
+            sudo apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=20 \
+              -o Acquire::https::Timeout=20 \
+              install -y \
+              --no-install-recommends \
+              glslang-tools
           fi
 
           echo
@@ -191,7 +266,7 @@ jobs:
       # ============================================================
       # Build
       # ============================================================
-      - name: Build Turnip Drivers
+      - name: Build Experimental Turnip Drivers
         shell: bash
         env:
           BUILD_VERSION: ${{ github.run_number }}
@@ -201,26 +276,44 @@ jobs:
           chmod +x build_turnip.sh
 
           echo "=========================================="
-          echo " Building Turnip Drivers"
+          echo " Building Experimental Turnip Drivers"
           echo "=========================================="
+
           echo "Version: v${BUILD_VERSION}"
           echo "Commit:  ${GITHUB_SHA}"
           echo "Ref:     ${GITHUB_REF_NAME}"
-          echo
 
+          echo
+          echo "Android NDK:"
+          readlink -f turnip_workdir/android-ndk-r29
+
+          echo
+          echo "Disk space:"
           df -h /
+
+          echo
+          echo "=========================================="
+          echo " Starting build_turnip.sh"
+          echo "=========================================="
 
           ./build_turnip.sh
 
       # ============================================================
-      # Validate build
+      # Validate output
       # ============================================================
       - name: Validate Build Outputs
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          test -d turnip_workdir
+          echo "=========================================="
+          echo " Validating build output"
+          echo "=========================================="
+
+          if [[ ! -d turnip_workdir ]]; then
+            echo "::error::turnip_workdir was not created."
+            exit 1
+          fi
 
           mapfile -t archives < <(
             find turnip_workdir \
@@ -233,24 +326,25 @@ jobs:
 
           if (( ${#archives[@]} == 0 )); then
             echo "::error::No Turnip driver ZIP files were produced."
+            echo
+            echo "Contents of turnip_workdir:"
+            find turnip_workdir -maxdepth 2 -print | sort || true
             exit 1
           fi
 
-          echo "=========================================="
-          echo " Build Output"
-          echo "=========================================="
-
+          echo
+          echo "Found ${#archives[@]} ZIP archive(s):"
           printf ' - %s\n' "${archives[@]}"
 
           echo
           echo "=========================================="
-          echo " Validating ZIP files"
+          echo " ZIP integrity"
           echo "=========================================="
 
           for archive in "${archives[@]}"; do
             echo "Testing: ${archive}"
             unzip -t "${archive}" >/dev/null
-            echo "OK"
+            echo "OK: ${archive}"
           done
 
           echo
@@ -265,12 +359,12 @@ jobs:
 
           echo
           echo "=========================================="
-          echo " Build Information"
+          echo " Build information"
           echo "=========================================="
 
           {
-            echo "Turnip Drivers Build"
-            echo "===================="
+            echo "Experimental Turnip Drivers Build"
+            echo "================================="
             echo
             echo "Version:        v${BUILD_VERSION}"
             echo "Git SHA:        ${GITHUB_SHA}"
@@ -280,6 +374,9 @@ jobs:
             echo "Runner:         ubuntu-24.04"
             echo "Build Date UTC: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             echo
+            echo "Android NDK:"
+            readlink -f turnip_workdir/android-ndk-r29
+            echo
             echo "Artifacts:"
             printf ' - %s\n' "${archives[@]}"
             echo
@@ -287,13 +384,16 @@ jobs:
             cat turnip_workdir/SHA256SUMS.txt
           } > turnip_workdir/BUILD_INFO.txt
 
+          echo
+          echo "Build validation completed successfully."
+
       # ============================================================
       # Upload artifacts
       # ============================================================
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Turnip-Drivers
+          name: Experimental-Turnip-Drivers
           path: |
             turnip_workdir/*.zip
             turnip_workdir/SHA256SUMS.txt
@@ -305,11 +405,11 @@ jobs:
       # ============================================================
       # GitHub Release
       # ============================================================
-      - name: Publish GitHub Release
+      - name: Publish Experimental GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          name: Turnip Drivers v${{ github.run_number }}
+          name: Experimental Turnip Drivers v${{ github.run_number }}
           generate_release_notes: true
           make_latest: true
           overwrite_files: true
@@ -327,7 +427,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Turnip Drivers — Build Summary"
+            echo "## Experimental Turnip Drivers — Build Summary"
             echo
             echo "| Property | Value |"
             echo "|---|---|"
@@ -335,7 +435,8 @@ jobs:
             echo "| Commit | \`${GITHUB_SHA}\` |"
             echo "| Ref | \`${GITHUB_REF_NAME}\` |"
             echo "| Runner | \`ubuntu-24.04\` |"
-            echo "| Artifact | \`Turnip-Drivers\` |"
+            echo "| NDK | \`r29\` |"
+            echo "| Artifact | \`Experimental-Turnip-Drivers\` |"
             echo "| Status | \`${{ job.status }}\` |"
             echo
             echo "### Release"
