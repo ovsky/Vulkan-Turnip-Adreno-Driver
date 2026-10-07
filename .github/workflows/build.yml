@@ -1,4 +1,4 @@
-name: Build Latet Turnip Drivers
+name: Build Latest Experimental Turnip Drivers
 
 on:
   workflow_dispatch:
@@ -14,27 +14,97 @@ jobs:
   build:
     name: Build & Release Turnip Drivers
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
       # Checkout
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
+      # Free runner disk space
+      #
+      # GitHub-hosted runners have limited SSD space. Turnip/Mesa
+      # builds can use several GB during NDK download + compilation.
+      # These directories contain tools that are not required by the
+      # Turnip build and are safe to remove on a disposable runner.
+      # ============================================================
+      - name: Prepare Build Storage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo " Disk space BEFORE cleanup"
+          echo "=========================================="
+          df -h /
+          echo
+
+          echo "Removing unnecessary preinstalled toolchains..."
+
+          # Large preinstalled toolchains not required by Turnip.
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+
+          # Preinstalled Android SDK/NDK is not used by build_turnip.sh;
+          # the required Android NDK r29 is downloaded explicitly by it.
+          sudo rm -rf /usr/local/lib/android || true
+
+          # Remove Docker images/cache if present.
+          if command -v docker >/dev/null 2>&1; then
+            sudo docker system prune -af --volumes || true
+          fi
+
+          # Remove package-manager caches.
+          sudo apt-get clean || true
+          sudo rm -rf /var/lib/apt/lists/* || true
+
+          # Remove runner/user caches that are not needed for this build.
+          rm -rf "${HOME}/.cache" || true
+
+          sync
+
+          echo
+          echo "=========================================="
+          echo " Disk space AFTER cleanup"
+          echo "=========================================="
+          df -h /
+
+          echo
+          echo "Filesystem:"
+          df -B1 / | tail -n 1
+
+          AVAILABLE_KB=$(df --output=avail / | tail -n 1 | tr -d ' ')
+
+          # Require at least 7 GB free before starting the build.
+          REQUIRED_KB=$((7 * 1024 * 1024))
+
+          if (( AVAILABLE_KB < REQUIRED_KB )); then
+            echo "::error::Not enough free disk space."
+            echo "Available: ${AVAILABLE_KB} KB"
+            echo "Required:  ${REQUIRED_KB} KB"
+            exit 1
+          fi
+
+          echo
+          echo "Enough disk space is available for the Turnip build."
+
+      # ============================================================
       # Dependencies
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
       - name: Install Dependencies
         shell: bash
         run: |
           set -Eeuo pipefail
 
           echo "=========================================="
-          echo " Checking preinstalled build tools"
+          echo " Checking build tools"
           echo "=========================================="
 
           command -v git
@@ -55,39 +125,19 @@ jobs:
           echo "Ninja:    $(ninja --version)"
           echo "Patchelf: $(patchelf --version | head -n 1)"
 
-          # GitHub's Ubuntu 24.04 runner already contains most
-          # dependencies required by the Turnip build.
-          # Only install glslang-tools when glslangValidator is missing.
+          # Only install glslang when it is genuinely missing.
           if ! command -v glslangValidator >/dev/null 2>&1; then
             echo
-            echo "=========================================="
-            echo " glslangValidator is missing"
-            echo " Installing glslang-tools"
-            echo "=========================================="
+            echo "glslangValidator is missing."
+            echo "Installing glslang-tools..."
 
-            # First try without refreshing APT indexes.
             if ! sudo apt-get \
-              -o Acquire::Retries=2 \
+              -o Acquire::Retries=3 \
               -o Acquire::http::Timeout=20 \
               -o Acquire::https::Timeout=20 \
               install -y --no-install-recommends glslang-tools; then
 
-              echo
-              echo "Existing APT indexes could not install glslang-tools."
-              echo "Refreshing package indexes with network timeouts..."
-
-              APT_SOURCES="/etc/apt/sources.list.d/ubuntu.sources"
-
-              if [[ -f "${APT_SOURCES}" ]]; then
-                sudo cp "${APT_SOURCES}" "${APT_SOURCES}.backup"
-
-                # Avoid hanging on the Azure mirror if it is unavailable.
-                sudo sed -i \
-                  's#azure\.archive\.ubuntu\.com#archive.ubuntu.com#g' \
-                  "${APT_SOURCES}"
-              fi
-
-              sudo apt-get clean
+              echo "Refreshing package lists..."
 
               sudo apt-get \
                 -o Acquire::Retries=3 \
@@ -132,11 +182,15 @@ jobs:
           glslangValidator --version | head -n 2
 
           echo
-          echo "All dependencies are ready."
+          echo "=========================================="
+          echo " Disk space before build"
+          echo "=========================================="
 
-      # ─────────────────────────────────────────────────────────────
+          df -h /
+
+      # ============================================================
       # Build
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
       - name: Build Turnip Drivers
         shell: bash
         env:
@@ -154,11 +208,13 @@ jobs:
           echo "Ref:     ${GITHUB_REF_NAME}"
           echo
 
+          df -h /
+
           ./build_turnip.sh
 
-      # ─────────────────────────────────────────────────────────────
-      # Validate output
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
+      # Validate build
+      # ============================================================
       - name: Validate Build Outputs
         shell: bash
         run: |
@@ -184,18 +240,17 @@ jobs:
           echo " Build Output"
           echo "=========================================="
 
-          echo "Found ${#archives[@]} archive(s):"
           printf ' - %s\n' "${archives[@]}"
 
           echo
           echo "=========================================="
-          echo " ZIP Validation"
+          echo " Validating ZIP files"
           echo "=========================================="
 
           for archive in "${archives[@]}"; do
-            echo "Validating: ${archive}"
+            echo "Testing: ${archive}"
             unzip -t "${archive}" >/dev/null
-            echo "OK: ${archive}"
+            echo "OK"
           done
 
           echo
@@ -203,12 +258,14 @@ jobs:
           echo " SHA-256"
           echo "=========================================="
 
-          sha256sum "${archives[@]}" > turnip_workdir/SHA256SUMS.txt
+          sha256sum "${archives[@]}" \
+            > turnip_workdir/SHA256SUMS.txt
+
           cat turnip_workdir/SHA256SUMS.txt
 
           echo
           echo "=========================================="
-          echo " Build Metadata"
+          echo " Build Information"
           echo "=========================================="
 
           {
@@ -230,11 +287,11 @@ jobs:
             cat turnip_workdir/SHA256SUMS.txt
           } > turnip_workdir/BUILD_INFO.txt
 
-      # ─────────────────────────────────────────────────────────────
-      # Upload CI artifacts
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
+      # Upload artifacts
+      # ============================================================
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: Turnip-Drivers
           path: |
@@ -245,11 +302,11 @@ jobs:
           retention-days: 30
           compression-level: 0
 
-      # ─────────────────────────────────────────────────────────────
-      # Release
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
+      # GitHub Release
+      # ============================================================
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: Turnip Drivers v${{ github.run_number }}
@@ -262,9 +319,9 @@ jobs:
             turnip_workdir/SHA256SUMS.txt
             turnip_workdir/BUILD_INFO.txt
 
-      # ─────────────────────────────────────────────────────────────
-      # GitHub Actions Summary
-      # ─────────────────────────────────────────────────────────────
+      # ============================================================
+      # Summary
+      # ============================================================
       - name: Generate Build Summary
         if: always()
         shell: bash
