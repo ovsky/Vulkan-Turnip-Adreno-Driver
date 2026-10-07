@@ -2,20 +2,33 @@ name: Build & Release Experimental Turnip Drivers
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional custom tag suffix (leave blank to use run number)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Build & Release Experimental Turnip Drivers
+    name: Build & Release Turnip Drivers
     runs-on: ubuntu-latest
+    
+    # Define BUILD_VERSION globally for the job here so actions/upload-artifact and releases can read it safely
+    env:
+      BUILD_VERSION: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.run_number }}
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Display Build Version
+        run: |
+          echo "Tag/Version to be built: ${{ env.BUILD_VERSION }}"
+
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -29,31 +42,52 @@ jobs:
             python3-pip \
             glslang-tools \
             curl \
-            zip
+            zip \
+            ccache
 
-          pip3 install \
+      - name: Install Python Dependencies via Pip
+        run: |
+          pip3 install --no-cache-dir \
             --break-system-packages \
             meson \
-            mako
+            mako \
+            pyyaml
 
-      - name: Build Experimental Turnip Drivers
+      - name: Build Turnip Drivers
         run: |
           chmod +x build_turnip.sh
-          export BUILD_VERSION="${{ github.run_number }}"
+          export BUILD_VERSION="${{ env.BUILD_VERSION }}"
           ./build_turnip.sh
 
-      - name: Upload Artifacts
+      - name: Locate and Verify Build Output
+        id: locate_artifacts
+        run: |
+          echo "Searching for built driver zips..."
+          find . -name "*.zip"
+          
+          mkdir -p final_artifacts
+          find . -maxdepth 3 -name "*.zip" -exec cp {} final_artifacts/ \;
+          
+          if [ -z "$(ls -A final_artifacts/*.zip 2>/dev/null)" ]; then
+            echo "Error: No driver zip packages were found after compilation!"
+            exit 1
+          fi
+          echo "Artifacts successfully gathered."
+
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Experimental-Turnip-Drivers
-          path: turnip_workdir/*.zip
+          name: Experimental-Turnip-Drivers-${{ env.BUILD_VERSION }}
+          path: final_artifacts/*.zip
           if-no-files-found: error
           retention-days: 30
 
-      - name: Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: Experimental Turnip Drivers v${{ github.run_number }}
-          files: turnip_workdir/*.zip
+          tag_name: v${{ env.BUILD_VERSION }}
+          name: Experimental Turnip Drivers v${{ env.BUILD_VERSION }}
+          files: final_artifacts/*.zip
           generate_release_notes: true
+          draft: false
+          prerelease: true
