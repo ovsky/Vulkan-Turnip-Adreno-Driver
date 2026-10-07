@@ -1,4 +1,4 @@
-name: Build Turnip
+name: Build Latest Turnip Drivers
 
 on:
   workflow_dispatch:
@@ -6,35 +6,265 @@ on:
 permissions:
   contents: write
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+  BUILD_VERSION: ${{ github.run_number }}
+
 jobs:
   build:
-    runs-on: ubuntu-latest
-    
+    name: Build & Release Turnip Drivers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ─────────────────────────────────────────────────────────────
+      # Source
+      # ─────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      - name: Install Dependencies
+      # ─────────────────────────────────────────────────────────────
+      # Dependencies
+      # ─────────────────────────────────────────────────────────────
+      - name: Install dependencies
+        shell: bash
         run: |
+          set -Eeuo pipefail
+
           sudo apt-get update
-          sudo apt-get install -y ninja-build patchelf unzip flex bison git perl python3-pip glslang-tools curl zip
-          pip3 install --break-system-packages meson mako
 
-      - name: Build Drivers
+          sudo apt-get install -y \
+            ninja-build \
+            patchelf \
+            unzip \
+            flex \
+            bison \
+            git \
+            perl \
+            python3-pip \
+            glslang-tools \
+            curl \
+            zip
+
+          python3 -m pip install \
+            --break-system-packages \
+            --disable-pip-version-check \
+            meson \
+            mako
+
+      # ─────────────────────────────────────────────────────────────
+      # Environment validation
+      # ─────────────────────────────────────────────────────────────
+      - name: Verify build environment
+        shell: bash
         run: |
+          set -Eeuo pipefail
+
+          echo "=========================================="
+          echo " Turnip CI Build Environment"
+          echo "=========================================="
+
+          echo "Git:"
+          git --version
+
+          echo
+          echo "Python:"
+          python3 --version
+          python3 -m pip --version
+
+          echo
+          echo "Meson:"
+          meson --version
+
+          echo
+          echo "Ninja:"
+          ninja --version
+
+          echo
+          echo "Patchelf:"
+          patchelf --version
+
+          echo
+          echo "GLSLang:"
+          glslangValidator --version | head -n 2
+
+          echo
+          echo "Mako:"
+          python3 - <<'PY'
+          import mako
+          print(mako.__version__)
+          PY
+
+          echo
+          echo "=========================================="
+          echo " Repository"
+          echo "=========================================="
+
+          echo "Commit:   ${GITHUB_SHA}"
+          echo "Ref:      ${GITHUB_REF_NAME}"
+          echo "Run:      ${GITHUB_RUN_NUMBER}"
+          echo "Run ID:   ${GITHUB_RUN_ID}"
+
+      # ─────────────────────────────────────────────────────────────
+      # Build
+      # ─────────────────────────────────────────────────────────────
+      - name: Build Turnip drivers
+        shell: bash
+        env:
+          BUILD_VERSION: ${{ github.run_number }}
+        run: |
+          set -Eeuo pipefail
+
           chmod +x build_turnip.sh
-          export BUILD_VERSION="${{ github.run_number }}"
+
+          echo "=========================================="
+          echo " Building Turnip Drivers"
+          echo "=========================================="
+          echo "Version: v${BUILD_VERSION}"
+          echo "Commit:  ${GITHUB_SHA}"
+          echo "Ref:     ${GITHUB_REF_NAME}"
+          echo
+
           ./build_turnip.sh
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      # ─────────────────────────────────────────────────────────────
+      # Validation / metadata / checksums
+      # ─────────────────────────────────────────────────────────────
+      - name: Validate build outputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          test -d turnip_workdir
+
+          mapfile -t archives < <(
+            find turnip_workdir \
+              -maxdepth 1 \
+              -type f \
+              -name '*.zip' \
+              -print |
+            sort
+          )
+
+          if (( ${#archives[@]} == 0 )); then
+            echo "::error::No Turnip driver ZIP files were produced."
+            exit 1
+          fi
+
+          echo "=========================================="
+          echo " Build Output"
+          echo "=========================================="
+          echo "Found ${#archives[@]} archive(s):"
+          printf ' - %s\n' "${archives[@]}"
+          echo
+
+          echo "=========================================="
+          echo " ZIP Validation"
+          echo "=========================================="
+
+          for archive in "${archives[@]}"; do
+            echo "Validating: ${archive}"
+            unzip -t "${archive}" >/dev/null
+            echo "OK: ${archive}"
+          done
+
+          echo
+          echo "=========================================="
+          echo " SHA-256"
+          echo "=========================================="
+
+          sha256sum "${archives[@]}" > turnip_workdir/SHA256SUMS.txt
+          cat turnip_workdir/SHA256SUMS.txt
+
+          echo
+          echo "=========================================="
+          echo " Build Metadata"
+          echo "=========================================="
+
+          {
+            echo "Turnip Drivers Build"
+            echo "===================="
+            echo
+            echo "Version:        v${BUILD_VERSION}"
+            echo "Git SHA:        ${GITHUB_SHA}"
+            echo "Git Ref:        ${GITHUB_REF_NAME}"
+            echo "Workflow Run:   ${GITHUB_RUN_ID}"
+            echo "Run Number:     ${GITHUB_RUN_NUMBER}"
+            echo "Runner:         ubuntu-24.04"
+            echo "Build Date UTC: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "Artifacts:"
+            printf ' - %s\n' "${archives[@]}"
+            echo
+            echo "SHA-256:"
+            cat turnip_workdir/SHA256SUMS.txt
+          } > turnip_workdir/BUILD_INFO.txt
+
+          echo
+          echo "Generated:"
+          echo " - turnip_workdir/SHA256SUMS.txt"
+          echo " - turnip_workdir/BUILD_INFO.txt"
+
+      # ─────────────────────────────────────────────────────────────
+      # CI artifact
+      # ─────────────────────────────────────────────────────────────
+      - name: Upload build artifacts
+        id: artifact
+        uses: actions/upload-artifact@v7
         with:
           name: Turnip-Drivers
-          path: turnip_workdir/*.zip
+          path: |
+            turnip_workdir/*.zip
+            turnip_workdir/SHA256SUMS.txt
+            turnip_workdir/BUILD_INFO.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
 
-      - name: Release
-        uses: softprops/action-gh-release@v2
+      # ─────────────────────────────────────────────────────────────
+      # GitHub Release
+      # ─────────────────────────────────────────────────────────────
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ github.run_number }}
-          files: turnip_workdir/*.zip
-  
+          name: Turnip Drivers v${{ github.run_number }}
+
+          generate_release_notes: true
+          make_latest: true
+
+          # Makes a workflow re-run capable of replacing assets
+          # belonging to the same run/tag.
+          overwrite_files: true
+          fail_on_unmatched_files: true
+
+          files: |
+            turnip_workdir/*.zip
+            turnip_workdir/SHA256SUMS.txt
+            turnip_workdir/BUILD_INFO.txt
+
+      # ─────────────────────────────────────────────────────────────
+      # GitHub Actions summary
+      # ─────────────────────────────────────────────────────────────
+      - name: Generate build summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Turnip Drivers — Build Summary"
+            echo
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| Version | \`v${GITHUB_RUN_NUMBER}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Ref | \`${GITHUB_REF_NAME}\` |"
+            echo "| Runner | \`ubuntu-24.04\` |"
+            echo "| Artifact | \`Turnip-Drivers\` |"
+            echo "| Status | \`${{ job.status }}\` |"
+            echo
+            echo "### Release"
+            echo
+            echo "[View GitHub Release](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${GITHUB_RUN_NUMBER})"
+          } >> "${GITHUB_STEP_SUMMARY}"
