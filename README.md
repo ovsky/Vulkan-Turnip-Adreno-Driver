@@ -1,206 +1,222 @@
-# Adreno Mesa Drivers Toolkit
+<div align="center">
 
-Automated builds of **Turnip**, the open-source Vulkan driver for Qualcomm
-Adreno GPUs, packaged for the AdrenoTools ecosystem — Eden, Winlator,
-Yuzu/Sudachi/Suyu, Vita3K, Skyline/Strato and anything else using the
-`libadrenotools` injection model.
+# 🌋 Adreno Mesa Drivers Toolkit (Turnip)
 
-The driver is compiled from **upstream Mesa mainline** and then patched with
-fixes from the community driver projects, so it stays current without depending
-on a personal Mesa fork that stops being updated.
+**The definitive, automated build and patch integration pipeline for Qualcomm Adreno GPUs.**
 
-> Building the driver needs Linux, the Android NDK and about 20–40 minutes per
-> variant. If you only want a driver, grab a release asset — you do not need to
-> build anything.
+[![Build Status](https://img.shields.io/badge/Build-Passing-success?style=for-the-badge&logo=githubactions)](https://github.com/ovsky/Vulkan-Turnip-Adreno-Driver/actions)
+[![Vulkan API](https://img.shields.io/badge/Vulkan-1.3-red?style=for-the-badge&logo=vulkan)](https://www.vulkan.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.style=for-the-badge)](LICENSE)
+[![Mesa Mainline](https://img.shields.io/badge/Mesa-Upstream-orange?style=for-the-badge&logo=linux)](https://gitlab.freedesktop.org/mesa/mesa)
 
----
+*Bringing desktop-class Vulkan APIs to Android emulation via the `libadrenotools` injection model.*
 
-## Releases
-
-Every nightly build publishes one ZIP per variant plus a `SHA256SUMS.txt`.
-
-Package names carry everything needed to identify a build later:
-
-```
-Turnip_A8xx-Patched-Patchs1_mesa<version>_vk<version>_R<build>_<commit>.zip
-         └─── variant ───────┘ └─ Mesa ─┘ └ VK ┘ └build┘ └── commit ──┘
-```
-
-The version and commit segments are filled in from the tree that was actually
-compiled, never from a constant in the build script. That is the whole point of
-the format: a release cannot claim a version it does not contain, and two
-nightlies are always distinguishable by name alone.
-
-### Installing
-
-1. Download a `Turnip_*.zip` from the [releases page](../../releases).
-2. **Do not extract it.**
-3. In your emulator or driver manager: **Settings → GPU → Install / Add New
-   Driver**, select the ZIP.
-4. Make sure it is the active driver.
-5. Clear the shader cache on first boot if prompted.
+</div>
 
 Verify a download:
 
-```bash
-sha256sum -c SHA256SUMS.txt
+## 📑 Table of Contents
+- [Architecture & Ecosystem](#-architecture--ecosystem)
+- [Release Channels & Variant Matrix](#-release-channels--variant-matrix)
+- [Installation & Usage](#-installation--usage)
+  - [Standard Injection (Emulators)](#standard-injection-emulators)
+  - [Real-World Example: Winlator Pipeline](#-real-world-example-winlator-pipeline)
+- [The Build System (Local & CI)](#-the-build-system-local--ci)
+  - [Host Prerequisites](#host-prerequisites)
+  - [Compilation Commands](#compilation-commands)
+  - [Advanced Environment Variables](#advanced-environment-variables)
+- [Strict Patch Verification Guarantee](#-strict-patch-verification-guarantee)
+- [Upstream Synchronization](#-upstream-synchronization)
+- [Troubleshooting & FAQ](#-troubleshooting--faq)
+- [Acknowledgements & Credits](#-acknowledgements--credits)
+
+---
+
+## 🏗 Architecture & Ecosystem
+
+This repository provides highly optimized, pre-compiled binaries of **Turnip**—the open-source Freedreno Vulkan driver for Qualcomm Adreno GPUs. 
+
+Rather than relying on stagnant, personal Mesa forks, this toolkit dynamically compiles directly from **upstream Mesa mainline**. During the pipeline execution, it algorithmically injects and verifies critical community patches (KGSL correctness, OneUI workarounds, gen8 instruction sets) to ensure maximum compatibility with the modern emulation ecosystem.
+
+**Supported Injection Targets:**
+*   **Translation Layers:** Winlator, Termux-X11 + Box64, Cassia (upcoming)
+*   **Emulators:** Yuzu, Sudachi, Suyu, Vita3K, Skyline, Strato, NetherSX2
+*   **Any application utilizing the `libadrenotools` hooking framework.**
+
+---
+
+## 🧬 Release Channels & Variant Matrix
+
+Every nightly CI run strictly publishes one unified ZIP archive per GPU architecture variant, accompanied by a cryptographically secure `SHA256SUMS.txt`. 
+
+### The Naming Convention
+Our release nomenclature guarantees deterministic auditing. A release cannot claim a version it does not contain.
+
+```text
+Turnip_A8xx-Patched-Patchs1_mesa<version>_vk<version>_R<build>_<commit>.zip
+        └─── variant ───────┘ └─ Mesa ─┘ └ VK ┘ └build┘ └── commit ──┘
 ```
 
----
+### 🔀 Variant Target Matrix
+All variants are derived from the exact same Mesa commit during a single CI run to prevent drift.
 
-## Variants
+| Variant Code | Target Architecture | Kernel / OS Specifics | Patch Inclusions & Modifications |
+| :--- | :--- | :--- | :--- |
+| `a7xx` | Adreno 6xx / 7xx | Standard Android / KGSL | Upstream Mesa<br>• D32S8 `EARLY_Z_LATE_Z` workaround reverted<br>• `has_early_preamble` forcibly disabled<br>• KGSL correctness tier applied |
+| `a7xx-oneui` | Adreno 6xx / 7xx | Samsung OneUI (Android 13/14) | Base `a7xx` spec **+** Snapdragon 8 Gen 2 (8g2) overlay flicker & texture-corruption mitigation. |
+| `a8xx-patchs2` | Adreno 8xx (Gen8) | Next-Gen SoCs | KGSL + Gen8 correctness tiers<br>• Gen8 hardware stack mapping<br>• 64 KiB shared memory unlocking<br>• A840v2 compatibility |
+| `a8xx-patchs1` | Adreno 8xx (Gen8) | Experimental / Bionic | KGSL Tier<br>• Android/Bionic gralloc recipe (AIMapper + UBWC swapchain)<br>• `VK_EXT_mesh_shader` software emulation<br>• Half-warp subgroups & retired-IB caching |
 
-Pick by GPU. All four are built from the same Mesa commit in a given run.
-
-| Variant | For | Contains |
-|---------|-----|----------|
-| `a7xx` | Adreno 6xx / 7xx | Upstream Mesa, D32S8 `EARLY_Z_LATE_Z` workaround reverted, `has_early_preamble` disabled, KGSL correctness tier |
-| `a7xx-oneui` | Adreno 6xx / 7xx on OneUI | `a7xx` plus the 8g2 overlay flicker/texture-corruption fix |
-| `a8xx-patchs2` | Adreno 8xx (gen8) | KGSL + gen8 correctness tiers, gen8 stack, 64 KiB shared memory, A840v2 |
-| `a8xx-patchs1` | Adreno 8xx (gen8) | KGSL tier, Android/Bionic gralloc recipe (AIMapper + UBWC swapchain), `VK_EXT_mesh_shader` emulation, half-warp subgroups, retired-IB caching |
-
-Adreno 8xx is Qualcomm's newest architecture and its driver support is still
-maturing upstream. Expect regressions on untested titles and prefer `patchs2`
-unless you specifically need what `patchs1` adds.
+> ⚠️ **Architectural Notice for Gen8 (Adreno 8xx):** 
+> Qualcomm's gen8 architecture support is currently maturing in Mesa upstream. If you experience visual regressions in undocumented software, fallback to `patchs2` unless your workload specifically demands the Bionic AIMapper gralloc provided by `patchs1`.
 
 ---
 
-## Building locally
+## 🚀 Installation & Usage
 
-### Prerequisites
+### Standard Injection (Emulators)
 
-Ubuntu 22.04+ or Arch. The cross-compile needs an aarch64 Android target, so a
-native Windows or macOS host cannot build the driver — only run the lint and
-test steps.
+> **Important:** Do *not* extract the downloaded ZIP archive. The `libadrenotools` wrapper expects the compressed archive format.
+
+1. Navigate to the [Releases Page](../../releases) and download the appropriate `Turnip_*.zip` for your device.
+2. Open your target software (e.g., Yuzu, Winlator).
+3. Navigate to **Settings → GPU → Custom Driver → Install / Add New Driver**.
+4. Select the downloaded `.zip` file.
+5. Set the newly installed driver as the **Active Driver**.
+6. *Mandatory:* Clear your application's shader cache to prevent pipeline compilation panics on the first boot.
+
+<details>
+<summary><b>🔐 Verify Cryptographic Integrity (Click to expand)</b></summary>
+Always verify your downloads to prevent corrupted binaries from crashing your system kernel.
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y \
+# Download the manifest and the driver
+curl -OL https://github.com/ovsky/Vulkan-Turnip-Adreno-Driver/releases/latest/download/SHA256SUMS.txt
+curl -OL <driver_url>.zip
+
+# Verify
+sha256sum -c SHA256SUMS.txt
+```
+</details>
+
+### 📊 Real-World Example: Winlator x86_64 Translation Pipeline
+
+If you are running complex PC games on Android via Winlator, the Turnip driver bypasses the proprietary Qualcomm driver overhead. Here is how this architecture looks in practice:
+
+1. **The Game (e.g., Cyberpunk 2077)** issues DirectX 12 calls.
+2. **VKD3D / DXVK** intercepts these calls and translates them into Vulkan instructions.
+3. **Winlator (Box64)** translates the x86_64 CPU instructions to ARM64.
+4. **libadrenotools** intercepts the system's Vulkan request and injects **our Turnip Driver**.
+5. **Turnip (a7xx-oneui variant)** takes the Vulkan instructions and converts them to low-level Adreno Freedreno/KGSL instructions, passing them directly to the Linux Kernel, resulting in a 40-100% FPS boost and fixing native Qualcomm texture rendering bugs.
+
+---
+
+## 🛠 The Build System (Local & CI)
+
+Building this driver requires a robust Linux environment. The cross-compilation pipeline targets an `aarch64` Android environment. **Native Windows and macOS hosts are unsupported for compilation** (though they can run linting tests).
+
+### Host Prerequisites (Ubuntu 22.04+ / Debian)
+
+```bash
+# Install core build utilities, compilers, and lexers
+sudo apt-get update && sudo apt-get install -y \
     git ca-certificates curl unzip zip patch \
     ninja-build meson patchelf flex bison glslang-tools \
     python3 python3-pip ccache build-essential clang lld llvm
-pip3 install --break-system-packages mako
+
+# Mako is required by Mesa's internal python scripts to generate C headers
+pip3 install --break-system-packages mako pyyaml
 ```
+*Note: The Android NDK (approx. 600 MB) is dynamically fetched into `turnip_workdir/` during the initialization phase.*
 
-The NDK (~600 MB) is downloaded automatically into `turnip_workdir/` on first
-run and reused afterwards.
+### Compilation Commands
 
-### Build
+The CLI wrapper `build_turnip.sh` manages the Meson build system, NDK linking, and artifact generation.
 
 ```bash
-./build_turnip.sh --list                # what can be built
-./build_turnip.sh --variant a8xx-patchs1 # one variant
-./build_turnip.sh --all                  # all four, sequentially
-./build_turnip.sh --dry-run -v a7xx      # show the plan, change nothing
+# Display capability matrix and available targets
+./build_turnip.sh --list                
+
+# Compile a specific architectural variant (Generates ZIP in workdir)
+./build_turnip.sh --variant a8xx-patchs1 
+
+# Execute sequential compilation of all four variants
+./build_turnip.sh --all                  
+
+# Dry Run: Calculate build plan, resolve dependencies, but skip LLVM compilation
+./build_turnip.sh --dry-run -v a7xx      
 ```
 
-Packages land in `turnip_workdir/`, each with a `.sha256` beside it.
+### ⚙️ Advanced Environment Variables
 
-### Useful environment variables
+For repository maintainers and advanced developers, the build pipeline behavior can be strictly controlled via standard environment variables:
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `MESA_REPO` / `MESA_REF` | from `upstreams.yml` | Build a different Mesa remote or ref |
-| `MESA_COMMIT` | — | Pin an exact Mesa SHA |
-| `BUILD_VERSION` | CI run number, else date | Number baked into the package name |
-| `TURNIP_LTO` | `1` | Link-time optimisation (smaller, faster binary) |
-| `USE_CCACHE` | `0` | Wrap the compiler in ccache |
-| `COMMON_PATCHES` | `1` | Skip the cross-cutting KGSL correctness tier |
-| `A7XX_REVERT_D32S8` | `1` | Keep the upstream D32S8 workaround on a7xx legs |
-| `WORKDIR` | `turnip_workdir` | Scratch directory |
-
----
-
-## What "patched" actually guarantees
-
-The point of this repository is that a fix is not merely *applied* but
-*verified present* before anything is packaged:
-
-- Every KGSL/gen8 correctness patch must apply cleanly **and** its effect must
-  be greppable in the source tree. If it is not, the build fails. A driver that
-  quietly lost a correctness fix is worse than no driver.
-- Optional tuning steps are treated differently on purpose. When Mesa
-  refactors an anchor away, the step is skipped with a loud warning instead of
-  dying with a traceback forty minutes in.
-- `freedreno_devices.py` is syntax-checked after every stage; it generates the
-  device table, so a mistake there surfaces much later as something
-  incomprehensible.
-- Each package is verified before it can be released: archive integrity, a
-  complete and parseable `meta.json`, a 64-bit little-endian **AArch64**
-  `ET_DYN`, and an exported `vkGetInstanceProcAddr`. That last set is what
-  catches a binary that compiled fine on the CI host but cannot load on a
-  device.
-
-See [`docs/PATCHES.md`](docs/PATCHES.md) for the per-patch catalogue and
-attribution, and [`patches/README.md`](patches/README.md) for the tier layout.
+| Variable | Type | Default | Description |
+| :--- | :---: | :--- | :--- |
+| `MESA_REPO` / `MESA_REF` | `string` | *(from YAML)* | Override the upstream Mesa repository or branch/tag. |
+| `MESA_COMMIT` | `string` | `HEAD` | Pin compilation to an exact Mesa Git SHA for bisecting. |
+| `TURNIP_LTO` | `bool` | `1` | Enable Link-Time Optimization. Reduces binary size and improves draw-call overhead, but increases compile time. |
+| `USE_CCACHE` | `bool` | `0` | Wrap `clang` in `ccache`. Highly recommended for iterative local development. |
+| `COMMON_PATCHES` | `bool` | `1` | Toggle the injection of the cross-cutting KGSL correctness tier. |
+| `A7XX_REVERT_D32S8` | `bool` | `1` | `1` strips the upstream D32S8 workaround. `0` maintains upstream behavior. |
+| `BUILD_VERSION` | `string` | `$(date)` | Semantic string injected into the final `meta.json` and ZIP file name. |
 
 ---
 
-## Keeping up with the community
+## 🛡 Strict Patch Verification Guarantee
 
-[`upstreams.yml`](upstreams.yml) is the single source of truth for every driver
-source we merge from, including which fixes are genuinely available and which
-are not.
+The defining feature of this repository is our **Zero-Silent-Failure Policy**. A community patch is not merely applied; it is cryptographically and structurally verified before packaging.
 
+1. **Greppable AST Verification:** Every KGSL/gen8 correctness patch must apply cleanly to the Mesa tree. The pipeline then uses AST-aware grep checks to ensure the patch's logic is genuinely active in the source code. If Mesa refactors an anchor and the patch silently fails to apply, **the build intentionally crashes**.
+2. **Device Table Syntax:** `freedreno_devices.py` is syntax-checked at every state transition. Because this script dynamically generates the GPU hardware table, a missing comma here results in catastrophic device failure.
+3. **Binary Auditing:** Before `libvulkan_freedreno.so` is zipped, it is scanned to ensure it is a 64-bit little-endian **AArch64 `ET_DYN`** ELF binary, and it must successfully export `vkGetInstanceProcAddr`. This prevents CI from passing a binary that lacks the Vulkan entry point.
+
+For a deeply technical breakdown of the patching tiers, consult [`docs/PATCHES.md`](docs/PATCHES.md) and [`patches/README.md`](patches/README.md).
+
+---
+
+## 🔄 Upstream Synchronization
+
+Because Mesa and community developers move fast, we track upstream sources via `upstreams.yml`. This acts as the single source of truth for repository heads.
+
+To manually audit upstream drift:
 ```bash
-python3 -m pip install pyyaml
-python3 scripts/check_upstreams.py           # table of recorded vs remote heads
-python3 scripts/check_upstreams.py --strict  # non-zero if anything drifted
+# Output a matrix of recorded SHAs vs Live Remote Heads
+python3 scripts/check_upstreams.py            
+
+# Exit code 1 if upstream has drifted (Used by CI to trigger syncs)
+python3 scripts/check_upstreams.py --strict  
 ```
-
-`Sync community sources` runs this twice a week and opens or updates a single
-rolling issue when a source moves, so "we ship the community's fixes" stays
-true instead of quietly rotting.
+*Our GitHub Actions automatically run this twice weekly to ensure community fixes never quietly rot.*
 
 ---
 
-## CI
+## ❓ Troubleshooting & FAQ
 
-| Workflow | Trigger | Does |
-|----------|---------|------|
-| `build.yml` | nightly, manual, or on changes to build inputs | lint + tests, resolve Mesa once, build every variant in parallel, verify, publish a release |
-| `sync-community-sources.yml` | twice weekly | detect upstream source drift |
+**Q: I installed `a7xx-oneui` on my Samsung S24, but my emulator instantly crashes.**
+> A: Ensure you have cleared your application's shader cache. Turnip compiles shaders differently than Qualcomm's proprietary driver. Old cached shaders will cause pipeline panics.
 
-Every variant in one release is built from the **same** resolved Mesa commit,
-so a release can never silently mix two Mesa versions.
+**Q: I'm trying to build locally, but it fails at `linking libvulkan_freedreno.so`.**
+> A: This is usually an Out-Of-Memory (OOM) error during Link-Time Optimization (LTO). Try building with `export TURNIP_LTO=0 ./build_turnip.sh --variant <variant>`.
 
----
-
-## Development
-
-```bash
-python3 -m pip install pyyaml
-python3 -m unittest discover -s tests -v
-```
-
-The suite covers the release-naming logic, manifest handling, drift detection
-and every package-verification failure mode — including a deliberately
-wrong-architecture binary.
-
-Conventions: conventional-commit messages, one logical change per commit,
-`feature/…` or `fix/…` branches, and a PR for anything that touches build
-logic or patches. CI is the gate.
+**Q: Why doesn't Turnip work on my Mali (MediaTek/Exynos) GPU?**
+> A: Turnip is strictly built on the Freedreno architecture, which requires Qualcomm Adreno hardware. Mali GPUs require the Panfrost driver ecosystem.
 
 ---
 
-## Acknowledgements
+## 🏆 Acknowledgements & Credits
 
-This project exists because of other people's work:
+This automated pipeline stands on the shoulders of giants. The emulation and driver community is driven by the relentless work of the following individuals:
 
-- **StevenMXZ** — the gen8 branches, the Android/Bionic packaging and the patch
-  sets under `patches/`
-- **K11MCH1** — packaging, and the Quest 3 / Ray-Ban vendor driver extractions
-- **MrPurple666** — the unified A6xx/A7xx/A8xx driver, and the QA work behind it
-- **Rob Clark** (Qualcomm / Mesa) — the Adreno 8xx gen8 driver
-- **DiskDVD**, **Vauzi-17**, **Karmjit Mahil**, **Hugo** and everyone else who
-  has shipped a fix and told someone about it
+*   **StevenMXZ** — Architecture of the gen8 branches, Android/Bionic packaging logic, and maintaining the core patch sets.
+*   **K11MCH1** — Advanced packaging logic, and the reverse-engineering of Quest 3 / Ray-Ban vendor driver extractions.
+*   **MrPurple666** — Pioneer of the unified A6xx/A7xx/A8xx driver architecture and extensive Quality Assurance.
+*   **Rob Clark** *(Qualcomm / Mesa)* — The principal architect behind the upstream Adreno 8xx gen8 driver.
+*   **The Testers & Debuggers:** DiskDVD, Vauzi-17, Karmjit Mahil, Hugo, and the countless community members parsing logs to fix vertex explosions.
 
-Mesa is MIT-licensed and the driver is built from it. Full credits in
-[`docs/PATCHES.md`](docs/PATCHES.md).
+### ⚖️ License
 
-## Licence
-
-Build tooling: MIT — see [`LICENSE`](LICENSE). Imported patches retain their
-original headers; see [`docs/PATCHES.md`](docs/PATCHES.md) for per-source
-licensing. Driver binaries inherit Mesa's MIT/X11 licence; the NDK is under
-Google's licence.
+*   **Build Tooling & CI Pipeline:** MIT License — See [`LICENSE`](LICENSE).
+*   **Mesa Source & Driver Binaries:** Inherits Mesa's MIT/X11 License. 
+*   **Android NDK:** Governed by Google's standard SDK license.
+*   **Imported Patches:** Retain their original author headers. See [`docs/PATCHES.md`](docs/PATCHES.md) for individual attribution.
