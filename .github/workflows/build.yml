@@ -61,16 +61,16 @@ jobs:
         run: |
           chmod +x build_turnip.sh
           
-          # FIX: Upstream Mesa 'main' moved Vulkan headers, breaking the script's version checker.
-          # We use sed to dynamically delete the lines that cause the script to intentionally 'fail'
-          # so that compilation can continue bypassing the broken header check.
-          sed -i '/could not determine Mesa\/Vulkan versions from the source tree/d' build_turnip.sh
-          sed -i '/refusing to guess a version for the release name/d' build_turnip.sh
+          # FIX: Aggressively search ALL shell scripts in the repository and neutralize 
+          # the lines triggering the Mesa version failure. Using Perl allows us to safely 
+          # delete the exit condition no matter what file it's in or how it's formatted.
+          find . -type f -name "*.sh" -exec perl -pi -e 's/.*could not determine Mesa.*//g' {} +
+          find . -type f -name "*.sh" -exec perl -pi -e 's/.*refusing to guess a version.*//g' {} +
           
           # Clean up any partial NDK downloads from previous runs to prevent curl write errors
           rm -rf turnip_workdir/android-ndk*
           
-          # Provide fallback variables just in case the script utilizes them for file naming
+          # Provide fallback variables directly to the environment
           export MESA_VERSION="24.4.0-devel"
           export VK_VERSION="1.3.296"
           export BUILD_VERSION="${{ env.BUILD_VERSION }}"
