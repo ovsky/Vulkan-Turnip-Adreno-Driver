@@ -16,7 +16,6 @@ jobs:
     name: Build & Release Turnip Drivers
     runs-on: ubuntu-latest
     
-    # Define BUILD_VERSION globally for the job here so actions/upload-artifact and releases can read it safely
     env:
       BUILD_VERSION: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.run_number }}
 
@@ -56,6 +55,8 @@ jobs:
       - name: Build Turnip Drivers
         run: |
           chmod +x build_turnip.sh
+          rm -rf turnip_workdir/android-ndk*
+          
           export BUILD_VERSION="${{ env.BUILD_VERSION }}"
           ./build_turnip.sh
 
