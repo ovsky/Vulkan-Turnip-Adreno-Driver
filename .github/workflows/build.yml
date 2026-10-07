@@ -129,6 +129,7 @@ jobs:
       commit: ${{ steps.resolve.outputs.commit }}
       version: ${{ steps.resolve.outputs.version }}
       vulkan: ${{ steps.resolve.outputs.vulkan }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
 
@@ -140,6 +141,7 @@ jobs:
         id: resolve
         env:
           MESA_REF: ${{ github.event.inputs.mesa_ref || 'main' }}
+          VARIANT: ${{ github.event.inputs.variant || 'all' }}
         run: |
           set -euo pipefail
           mkdir -p probe && cd probe
@@ -158,19 +160,24 @@ jobs:
           VULKAN="$(python3 -c 'import json;print(json.load(open("facts.json"))["vulkan_version"])')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "vulkan=$VULKAN" >> "$GITHUB_OUTPUT"
-          echo "Mesa $VERSION / Vulkan $VULKAN"
+          echo "Mesa $VERSION / Vulkan$VULKAN"
+
+          if [ "$VARIANT" = "all" ] \vert{}\vert{} [ -z "$VARIANT" ]; then
+            echo 'matrix=["a7xx", "a7xx-oneui", "a8xx-patchs2", "a8xx-patchs1"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix=[\"$VARIANT\"]" >> "$GITHUB_OUTPUT"
+          fi
 
   # ---------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.variant }}
     needs: resolve
-    if: github.event_name != 'workflow_dispatch' || inputs.variant == 'all' || inputs.variant == matrix.variant
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        variant: [a7xx, a7xx-oneui, a8xx-patchs2, a8xx-patchs1]
+        variant: ${{ fromJSON(needs.resolve.outputs.matrix) }}
     env:
       BUILD_VERSION: ${{ github.run_number }}
       USE_CCACHE: '1'
@@ -263,7 +270,7 @@ jobs:
             echo
             echo "| Mesa | Vulkan |"
             echo "|------|--------|"
-            echo "| ${{ needs.resolve.outputs.version }} | ${{ needs.resolve.outputs.vulkan }} |"
+            echo "| ${{ needs.resolve.outputs.version }} \vert{}${{ needs.resolve.outputs.vulkan }} |"
             echo
             echo "### Packages"
             echo
