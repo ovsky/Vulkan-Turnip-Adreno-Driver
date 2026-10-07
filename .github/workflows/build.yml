@@ -43,9 +43,10 @@ on:
       - 'upstreams.yml'
       - '.github/workflows/build.yml'
 
-# Never let two full builds race for the same release tag.
+# Group by branch and the selected variant so manual builds of different 
+# variants don't cancel each other. Redundant pushes will still cancel.
 concurrency:
-  group: turnip-build-${{ github.ref }}
+  group: turnip-build-${{ github.ref }}-${{ github.event.inputs.variant || 'all' }}
   cancel-in-progress: true
 
 permissions:
