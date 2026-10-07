@@ -13,7 +13,7 @@
 
 </div>
 
----
+Verify a download:
 
 ## 📑 Table of Contents
 - [Architecture & Ecosystem](#-architecture--ecosystem)

@@ -33,18 +33,11 @@ TARGET = "src/freedreno/vulkan/tu_cmd_buffer.cc"
 # The upstream hunk, plus the comment that introduces it and the blank line
 # that follows. Whitespace inside the condition is allowed to vary because Mesa
 # reformats it over time; the anchors stay literal.
-#
-# The continuation group is deliberately "[^\n]*\n" and NOT "[ \t]*[^\n]*\n".
-# Both can match the same text, so with the outer repetition each line can be
-# split between the two in as many ways as it has leading spaces -- catastrophic
-# backtracking. tu_cmd_buffer.cc is a ~6000-line file, and the ambiguous form
-# does not finish on it; it hangs the build before compiling anything. A single
-# unambiguous character class per line parses each line exactly once.
 _BLOCK = re.compile(
     r"(?:[ \t]*/\*[^*\n]*\*/[ \t]*\n)?"                       # leading comment
     r"[ \t]*if[ \t]*\([ \t]*CHIP[ \t]*==[ \t]*A6XX[ \t]*&&[ \t]*"
     r"zmode[ \t]*==[ \t]*A6XX_EARLY_Z_LATE_Z[^\n]*\n"         # condition, line 1
-    r"(?:[^\n]*\n)*?"                                        # condition, rest
+    r"(?:[ \t]*[^\n]*\n)*?"                                   # condition, rest
     r"[ \t]*zmode[ \t]*=[ \t]*A6XX_LATE_Z;[ \t]*\n"           # body
     r"(?:[ \t]*\r?\n)?",                                      # trailing blank
 )

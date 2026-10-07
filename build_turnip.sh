@@ -529,13 +529,13 @@ build_android() {
     # that mismatch, not -Werror being disabled wholesale: Mesa does not turn
     # on -Werror for a release build, but the stub headers still trip warnings
     # that would otherwise be errors on some NDK versions.
-    local ndk_warnings="'--start-no-unused-arguments' '-Wno-error' '-Wno-error=gnu-empty-initializer' '-Wno-gnu-empty-initializer' '-Wno-deprecated-declarations' '-Wno-incompatible-pointer-types-qualified'"
+    local ndk_warnings="'--start-no-unused-arguments' '-Wno-error' '-Wno-error=gnu-empty-initializer' '-Wno-gnu-empty-initializer' '-Wno-deprecated-declarations' '-Wno-incompatible-pointer-types-discards-qualifiers' '-Wno-incompatible-pointer-types'"
 
     cat > "$build_dir/android-aarch64.txt" <<EOF
 [binaries]
 ar = '$NDK/llvm-ar'
 c = [$wrapper'$NDK/aarch64-linux-android${api_clang}-clang', $ndk_warnings]
-cpp = [$wrapper'$NDK/aarch64-linux-android${api_clang}-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '--start-no-unused-arguments', '-static-libstdc++', '-Wno-unknown-warning-option']
+cpp = [$wrapper'$NDK/aarch64-linux-android${api_clang}-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '--start-no-unused-arguments', '-static-libstdc++', '--end-no-unused-arguments', $ndk_warnings]
 c_ld = '$NDK/ld.lld'
 cpp_ld = '$NDK/ld.lld'
 strip = '$NDK/llvm-strip'
