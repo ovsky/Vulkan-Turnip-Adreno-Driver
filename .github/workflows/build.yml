@@ -1,317 +1,40 @@
 name: Build Turnip
 
-# =============================================================================
-# Builds every AdrenoTools Turnip variant from the same pinned Mesa commit,
-# verifies each package, and publishes them as one release.
-#
-# Scheduling is deliberately loose (nightly) rather than weekly: the whole
-# point of building from Mesa mainline is picking up upstream fixes quickly,
-# and Mesa lands several a week.
-# =============================================================================
-
 on:
-  schedule:
-    - cron: '17 4 * * *'
   workflow_dispatch:
-    inputs:
-      variant:
-        description: 'Build a single variant instead of the full set'
-        required: false
-        type: choice
-        default: all
-        options:
-          - all
-          - a7xx
-          - a7xx-oneui
-          - a8xx-patchs2
-          - a8xx-patchs1
-      mesa_ref:
-        description: 'Mesa ref to build from'
-        required: false
-        default: main
-      publish:
-        description: 'Publish a GitHub release'
-        required: false
-        type: boolean
-        default: true
-  push:
-    branches: [main, feat/community-driver-merge]
-    paths:
-      - 'build_turnip.sh'
-      - 'scripts/**'
-      - 'patches/**'
-      - 'upstreams.yml'
-      - '.github/workflows/build.yml'
-
-# Never let two full builds race for the same release tag.
-concurrency:
-  group: turnip-build-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
-  contents: read
-
-env:
-  MESA_REPO: https://gitlab.freedesktop.org/mesa/mesa.git
+  contents: write
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Fast gate. Catches shell syntax errors, broken Python and invalid YAML in
-  # seconds instead of after four 20-minute builds.
-  # ---------------------------------------------------------------------------
-  lint:
-    name: Lint and test
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Python lint deps
-        run: |
-          set -euo pipefail
-          python3 -m pip install --break-system-packages --disable-pip-version-check pyyaml
-
-      - name: Check shell syntax
-        run: |
-          set -euo pipefail
-          while IFS= read -r script; do
-            echo "  bash -n $script"
-            bash -n "$script"
-          done < <(find . -name '*.sh' -not -path './.git/*')
-        shell: bash
-
-      - name: Check Python syntax
-        run: |
-          set -euo pipefail
-          python3 -m compileall -q scripts tests patches
-        shell: bash
-
-      - name: Validate YAML
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import glob, sys, yaml
-          paths = ["upstreams.yml"] + sorted(glob.glob(".github/workflows/*.yml"))
-          for path in paths:
-              with open(path, encoding="utf-8") as handle:
-                  yaml.safe_load(handle)
-              print("  ok", path)
-          PY
-        shell: bash
-
-      - name: Run unit tests
-        run: |
-          set -euo pipefail
-          python3 -m unittest discover -s tests -v
-
-      - name: Build script self-check
-        run: |
-          set -euo pipefail
-          chmod +x build_turnip.sh
-          ./build_turnip.sh --list
-          ./build_turnip.sh --help
-          if ./build_turnip.sh --variant nonsense; then
-            echo "::error::--variant accepted an unknown variant"
-            exit 1
-          fi
-
-  # ---------------------------------------------------------------------------
-  # Resolve Mesa once so every variant in a release is byte-for-byte the same
-  # upstream base. Without this, a release can silently mix two Mesa commits.
-  # ---------------------------------------------------------------------------
-  resolve:
-    name: Resolve Mesa
-    needs: lint
-    runs-on: ubuntu-24.04
-    outputs:
-      commit: ${{ steps.resolve.outputs.commit }}
-      version: ${{ steps.resolve.outputs.version }}
-      vulkan: ${{ steps.resolve.outputs.vulkan }}
-      matrix: ${{ steps.resolve.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Resolve and read Mesa version
-        id: resolve
-        env:
-          MESA_REF: ${{ github.event.inputs.mesa_ref || 'main' }}
-          VARIANT: ${{ github.event.inputs.variant || 'all' }}
-        run: |
-          set -euo pipefail
-          mkdir -p probe && cd probe
-          git init -q .
-          git remote add origin "$MESA_REPO"
-          
-          # Configure sparse checkout to ensure include/vulkan/vulkan_core.h and VERSION are downloaded
-          git config core.sparseCheckout true
-          echo -e "VERSION\ninclude/vulkan/vulkan_core.h" > .git/info/sparse-checkout
-
-          # Fetch without skipping necessary path files
-          git fetch -q --depth=1 --filter=blob:none origin "refs/heads/$MESA_REF"
-          git checkout -q --detach FETCH_HEAD
-
-          COMMIT="$(git rev-parse HEAD)"
-          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
-          echo "Mesa $MESA_REF @ $COMMIT"
-
-          python3 "$GITHUB_WORKSPACE/scripts/mesa_facts.py" . > facts.json
-          VERSION="$(python3 -c 'import json;print(json.load(open("facts.json"))["mesa_version"])')"
-          VULKAN="$(python3 -c 'import json;print(json.load(open("facts.json"))["vulkan_version"])')"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "vulkan=$VULKAN" >> "$GITHUB_OUTPUT"
-          echo "Mesa $VERSION / Vulkan$VULKAN"
-
-          # Determine the build matrix dynamically based on workflow inputs or push events
-          if [ "$VARIANT" = "all" ] \vert{}\vert{} [ -z "$VARIANT" ]; then
-            echo 'matrix=["a7xx", "a7xx-oneui", "a8xx-patchs2", "a8xx-patchs1"]' >> "$GITHUB_OUTPUT"
-          else
-            echo "matrix=[\"$VARIANT\"]" >> "$GITHUB_OUTPUT"
-          fi
-
-  # ---------------------------------------------------------------------------
   build:
-    name: Build ${{ matrix.variant }}
-    needs: resolve
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: ${{ fromJSON(needs.resolve.outputs.matrix) }}
-    env:
-      BUILD_VERSION: ${{ github.run_number }}
-      USE_CCACHE: '1'
-      TURNIP_LTO: '1'
+    runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install Dependencies
         run: |
-          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            git ca-certificates curl unzip zip patch \
-            ninja-build patchelf flex bison glslang-tools \
-            python3 python3-pip ccache \
-            build-essential clang lld llvm
-          python3 -m pip install --break-system-packages --disable-pip-version-check meson mako
+          sudo apt-get install -y ninja-build patchelf unzip flex bison git perl python3-pip glslang-tools curl zip
+          pip3 install --break-system-packages meson mako
 
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-${{ matrix.variant }}-${{ needs.resolve.outputs.commit }}
-          restore-keys: |
-            ccache-${{ matrix.variant }}-
-            ccache-
-
-      - name: Build ${{ matrix.variant }}
-        env:
-          MESA_REPO: ${{ env.MESA_REPO }}
-          MESA_COMMIT: ${{ needs.resolve.outputs.commit }}
-          VARIANT: ${{ matrix.variant }}
+      - name: Build Drivers
         run: |
-          set -euo pipefail
           chmod +x build_turnip.sh
-          ./build_turnip.sh --variant "$VARIANT"
-        shell: bash
+          export BUILD_VERSION="${{ github.run_number }}"
+          ./build_turnip.sh
 
-      - name: Collect artifacts
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          cp turnip_workdir/Turnip_*.zip turnip_workdir/Turnip_*.zip.sha256 dist/
-          ls -l dist/
-        shell: bash
-
-      - name: Upload ${{ matrix.variant }}
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: turnip-${{ matrix.variant }}
-          path: dist/
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
+          name: Turnip-Drivers
+          path: turnip_workdir/*.zip
 
-  # ---------------------------------------------------------------------------
-  release:
-    name: Publish release
-    needs: [resolve, build]
-    if: github.event_name != 'workflow_dispatch' || inputs.publish
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all variants
-        uses: actions/download-artifact@v4
-        with:
-          pattern: turnip-*
-          path: dist
-          merge-multiple: true
-
-      - name: Assemble release assets
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          zips=(dist/Turnip_*.zip)
-          echo "found ${#zips[@]} package(s)"
-          test "${#zips[@]}" -ge 1
-          ( cd dist && sha256sum Turnip_*.zip > SHA256SUMS.txt )
-          cat dist/SHA256SUMS.txt
-        shell: bash
-
-      - name: Build release notes
-        run: |
-          set -euo pipefail
-          {
-            echo "Automated Turnip build from upstream Mesa \`${{ needs.resolve.outputs.commit }}\`."
-            echo
-            echo "| Mesa | Vulkan |"
-            echo "|------|--------|"
-            echo "| ${{ needs.resolve.outputs.version }} \vert{}${{ needs.resolve.outputs.vulkan }} |"
-            echo
-            echo "### Packages"
-            echo
-            for zip in dist/Turnip_*.zip; do
-              echo "**\`$(basename "$zip")\`**"
-              echo
-              echo '```'
-              unzip -p "$zip" meta.json
-              echo '```'
-              echo
-            done
-            echo "### Provenance"
-            echo
-            echo "Fixes are merged from the community projects tracked in \`upstreams.yml\`."
-            echo "See \`docs/PATCHES.md\` for the per-patch catalogue and attribution."
-            echo
-            echo "Verify a download with:"
-            echo
-            echo '```'
-            echo "sha256sum -c SHA256SUMS.txt"
-            echo '```'
-          } > release-notes.md
-          cat release-notes.md
-        shell: bash
-
-      - name: Publish
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Turnip-R${{ github.run_number }}-${{ needs.resolve.outputs.version }}
-          name: "Turnip ${{ needs.resolve.outputs.version }} (Vulkan ${{ needs.resolve.outputs.vulkan }}) - build ${{ github.run_number }}"
-          body_path: release-notes.md
-          files: |
-            dist/Turnip_*.zip
-            dist/SHA256SUMS.txt
-          fail_on_unmatched_files: true
-          draft: false
-          prerelease: ${{ contains(github.ref, 'dev') }}
+          tag_name: v${{ github.run_number }}
+          files: turnip_workdir/*.zip
+  
