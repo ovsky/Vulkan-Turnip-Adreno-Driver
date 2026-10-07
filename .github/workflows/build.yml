@@ -52,11 +52,15 @@ jobs:
             mako \
             pyyaml
 
+      - name: Prepare Build Directory
+        run: |
+          # Create and grant full permissions to the workdir expected by build_turnip.sh
+          mkdir -p turnip_workdir
+          chmod 777 turnip_workdir
+
       - name: Build Turnip Drivers
         run: |
           chmod +x build_turnip.sh
-          rm -rf turnip_workdir/android-ndk*
-          
           export BUILD_VERSION="${{ env.BUILD_VERSION }}"
           ./build_turnip.sh
 
