@@ -1,4 +1,4 @@
-name: Build Latest Turnip Drivers
+name: Build Latet Turnip Drivers
 
 on:
   workflow_dispatch:
@@ -14,11 +14,11 @@ jobs:
   build:
     name: Build & Release Turnip Drivers
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 45
 
     steps:
       # ─────────────────────────────────────────────────────────────
-      # Source
+      # Checkout
       # ─────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -28,89 +28,116 @@ jobs:
       # ─────────────────────────────────────────────────────────────
       # Dependencies
       # ─────────────────────────────────────────────────────────────
-      - name: Install dependencies
+      - name: Install Dependencies
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          sudo apt-get update
+          echo "=========================================="
+          echo " Checking preinstalled build tools"
+          echo "=========================================="
 
-          sudo apt-get install -y \
-            ninja-build \
-            patchelf \
-            unzip \
-            flex \
-            bison \
-            git \
-            perl \
-            python3-pip \
-            glslang-tools \
-            curl \
-            zip
+          command -v git
+          command -v python3
+          command -v pip3
+          command -v ninja
+          command -v flex
+          command -v bison
+          command -v patchelf
+          command -v unzip
+          command -v zip
+          command -v curl
+
+          echo
+          echo "Git:      $(git --version)"
+          echo "Python:   $(python3 --version)"
+          echo "Pip:      $(python3 -m pip --version)"
+          echo "Ninja:    $(ninja --version)"
+          echo "Patchelf: $(patchelf --version | head -n 1)"
+
+          # GitHub's Ubuntu 24.04 runner already contains most
+          # dependencies required by the Turnip build.
+          # Only install glslang-tools when glslangValidator is missing.
+          if ! command -v glslangValidator >/dev/null 2>&1; then
+            echo
+            echo "=========================================="
+            echo " glslangValidator is missing"
+            echo " Installing glslang-tools"
+            echo "=========================================="
+
+            # First try without refreshing APT indexes.
+            if ! sudo apt-get \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=20 \
+              -o Acquire::https::Timeout=20 \
+              install -y --no-install-recommends glslang-tools; then
+
+              echo
+              echo "Existing APT indexes could not install glslang-tools."
+              echo "Refreshing package indexes with network timeouts..."
+
+              APT_SOURCES="/etc/apt/sources.list.d/ubuntu.sources"
+
+              if [[ -f "${APT_SOURCES}" ]]; then
+                sudo cp "${APT_SOURCES}" "${APT_SOURCES}.backup"
+
+                # Avoid hanging on the Azure mirror if it is unavailable.
+                sudo sed -i \
+                  's#azure\.archive\.ubuntu\.com#archive.ubuntu.com#g' \
+                  "${APT_SOURCES}"
+              fi
+
+              sudo apt-get clean
+
+              sudo apt-get \
+                -o Acquire::Retries=3 \
+                -o Acquire::http::Timeout=20 \
+                -o Acquire::https::Timeout=20 \
+                update
+
+              sudo apt-get \
+                -o Acquire::Retries=3 \
+                -o Acquire::http::Timeout=20 \
+                -o Acquire::https::Timeout=20 \
+                install -y --no-install-recommends glslang-tools
+            fi
+          fi
+
+          echo
+          echo "=========================================="
+          echo " Installing Python dependencies"
+          echo "=========================================="
 
           python3 -m pip install \
             --break-system-packages \
             --disable-pip-version-check \
+            --no-cache-dir \
             meson \
             mako
 
-      # ─────────────────────────────────────────────────────────────
-      # Environment validation
-      # ─────────────────────────────────────────────────────────────
-      - name: Verify build environment
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
+          echo
           echo "=========================================="
-          echo " Turnip CI Build Environment"
+          echo " Verifying dependencies"
           echo "=========================================="
 
-          echo "Git:"
-          git --version
-
-          echo
-          echo "Python:"
-          python3 --version
-          python3 -m pip --version
-
-          echo
           echo "Meson:"
           meson --version
 
           echo
-          echo "Ninja:"
-          ninja --version
-
-          echo
-          echo "Patchelf:"
-          patchelf --version
+          echo "Mako:"
+          python3 -c "import mako; print(mako.__version__)"
 
           echo
           echo "GLSLang:"
           glslangValidator --version | head -n 2
 
           echo
-          echo "Mako:"
-          python3 - <<'PY'
-          import mako
-          print(mako.__version__)
-          PY
-
-          echo
-          echo "=========================================="
-          echo " Repository"
-          echo "=========================================="
-
-          echo "Commit:   ${GITHUB_SHA}"
-          echo "Ref:      ${GITHUB_REF_NAME}"
-          echo "Run:      ${GITHUB_RUN_NUMBER}"
-          echo "Run ID:   ${GITHUB_RUN_ID}"
+          echo "All dependencies are ready."
 
       # ─────────────────────────────────────────────────────────────
       # Build
       # ─────────────────────────────────────────────────────────────
-      - name: Build Turnip drivers
+      - name: Build Turnip Drivers
         shell: bash
         env:
           BUILD_VERSION: ${{ github.run_number }}
@@ -130,9 +157,9 @@ jobs:
           ./build_turnip.sh
 
       # ─────────────────────────────────────────────────────────────
-      # Validation / metadata / checksums
+      # Validate output
       # ─────────────────────────────────────────────────────────────
-      - name: Validate build outputs
+      - name: Validate Build Outputs
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -156,10 +183,11 @@ jobs:
           echo "=========================================="
           echo " Build Output"
           echo "=========================================="
+
           echo "Found ${#archives[@]} archive(s):"
           printf ' - %s\n' "${archives[@]}"
-          echo
 
+          echo
           echo "=========================================="
           echo " ZIP Validation"
           echo "=========================================="
@@ -202,16 +230,10 @@ jobs:
             cat turnip_workdir/SHA256SUMS.txt
           } > turnip_workdir/BUILD_INFO.txt
 
-          echo
-          echo "Generated:"
-          echo " - turnip_workdir/SHA256SUMS.txt"
-          echo " - turnip_workdir/BUILD_INFO.txt"
-
       # ─────────────────────────────────────────────────────────────
-      # CI artifact
+      # Upload CI artifacts
       # ─────────────────────────────────────────────────────────────
-      - name: Upload build artifacts
-        id: artifact
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v7
         with:
           name: Turnip-Drivers
@@ -224,31 +246,26 @@ jobs:
           compression-level: 0
 
       # ─────────────────────────────────────────────────────────────
-      # GitHub Release
+      # Release
       # ─────────────────────────────────────────────────────────────
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ github.run_number }}
           name: Turnip Drivers v${{ github.run_number }}
-
           generate_release_notes: true
           make_latest: true
-
-          # Makes a workflow re-run capable of replacing assets
-          # belonging to the same run/tag.
           overwrite_files: true
           fail_on_unmatched_files: true
-
           files: |
             turnip_workdir/*.zip
             turnip_workdir/SHA256SUMS.txt
             turnip_workdir/BUILD_INFO.txt
 
       # ─────────────────────────────────────────────────────────────
-      # GitHub Actions summary
+      # GitHub Actions Summary
       # ─────────────────────────────────────────────────────────────
-      - name: Generate build summary
+      - name: Generate Build Summary
         if: always()
         shell: bash
         run: |
