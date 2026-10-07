@@ -43,10 +43,9 @@ on:
       - 'upstreams.yml'
       - '.github/workflows/build.yml'
 
-# Group by branch and the selected variant so manual builds of different 
-# variants don't cancel each other. Redundant pushes will still cancel.
+# Never let two full builds race for the same release tag.
 concurrency:
-  group: turnip-build-${{ github.ref }}-${{ github.event.inputs.variant || 'all' }}
+  group: turnip-build-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -131,7 +130,6 @@ jobs:
       commit: ${{ steps.resolve.outputs.commit }}
       version: ${{ steps.resolve.outputs.version }}
       vulkan: ${{ steps.resolve.outputs.vulkan }}
-      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
 
@@ -143,13 +141,17 @@ jobs:
         id: resolve
         env:
           MESA_REF: ${{ github.event.inputs.mesa_ref || 'main' }}
-          VARIANT: ${{ github.event.inputs.variant || 'all' }}
         run: |
           set -euo pipefail
           mkdir -p probe && cd probe
           git init -q .
           git remote add origin "$MESA_REPO"
-          # Blobless: we only need VERSION and vulkan_core.h, not 400 MB of Mesa.
+          
+          # Configure sparse checkout to ensure include/vulkan/vulkan_core.h and VERSION are downloaded
+          git config core.sparseCheckout true
+          echo -e "VERSION\ninclude/vulkan/vulkan_core.h" > .git/info/sparse-checkout
+
+          # Fetch without skipping necessary path files
           git fetch -q --depth=1 --filter=blob:none origin "refs/heads/$MESA_REF"
           git checkout -q --detach FETCH_HEAD
 
@@ -164,22 +166,17 @@ jobs:
           echo "vulkan=$VULKAN" >> "$GITHUB_OUTPUT"
           echo "Mesa $VERSION / Vulkan$VULKAN"
 
-          if [ "$VARIANT" = "all" ] \vert{}\vert{} [ -z "$VARIANT" ]; then
-            echo 'matrix=["a7xx", "a7xx-oneui", "a8xx-patchs2", "a8xx-patchs1"]' >> "$GITHUB_OUTPUT"
-          else
-            echo "matrix=[\"$VARIANT\"]" >> "$GITHUB_OUTPUT"
-          fi
-
   # ---------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.variant }}
     needs: resolve
+    if: github.event_name != 'workflow_dispatch' || inputs.variant == 'all' || inputs.variant == matrix.variant
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+        variant: [a7xx, a7xx-oneui, a8xx-patchs2, a8xx-patchs1]
     env:
       BUILD_VERSION: ${{ github.run_number }}
       USE_CCACHE: '1'
