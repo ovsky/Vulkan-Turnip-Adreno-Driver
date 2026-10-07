@@ -111,6 +111,7 @@ jobs:
       - name: Build script self-check
         run: |
           set -euo pipefail
+          chmod +x build_turnip.sh
           ./build_turnip.sh --list
           ./build_turnip.sh --help
           if ./build_turnip.sh --variant nonsense; then
