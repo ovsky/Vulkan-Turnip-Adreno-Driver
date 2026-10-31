@@ -40,8 +40,8 @@ base:
   # point rather than a problem. The tracker reports it for information and
   # does not raise drift.
   drift_expected: true
-  # Recorded 2026-10-03. Informational only.
-  observed_head: 3821bf78426f5515d26047e49164beedb8ecd18d
+  # Recorded 2026-10-31. Informational only.
+  observed_head: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t
   notes: >-
     Upstream Mesa mainline. The Adreno 8xx/gen8 driver work by Rob Clark
     (Qualcomm) has landed upstream, so building from mainline plus our patch
@@ -58,13 +58,13 @@ sources:
   - id: stevenmxz
     name: StevenMXZ / Adreno-Tools-Drivers
     url: https://github.com/StevenMXZ/Adreno-Tools-Drivers
-    ref: A8xx
+    ref: main
     role: patches
     availability: public
     license: GPL-3.0
-    # Head observed 2026-10-03. The sync workflow compares against this and
+    # Head observed 2026-10-31. The sync workflow compares against this and
     # raises drift when a new patch lands upstream.
-    observed_head: b3b32ad30e7d7b4bd897e678af064036eeb9df09
+    observed_head: x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0
     imported:
       - patches/patchs1/
       - patches/patchs2/
@@ -132,7 +132,7 @@ sources:
     role: validation
     availability: public
     license: unspecified
-    observed_head: f8de3456d423fff7683377cc32291ba77e4371fc
+    observed_head: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t
     tracked_release: vturnip_mrpurple_T30-toasted.adpkg
     fixes_reported:
       - "Upstream to latest Mesa source"
@@ -158,7 +158,7 @@ sources:
     role: validation
     availability: binary-only
     license: unspecified
-    observed_head: 278cdc7522e0873fed1e3aa963539a0c374c7862
+    observed_head: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t
     tracked_release: v840
     fixes_reported:
       - "Vendor Qualcomm driver extracted from Quest 3 (v837, Vulkan 1.3.295)"

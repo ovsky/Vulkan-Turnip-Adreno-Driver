@@ -62,7 +62,15 @@ MESA_DIR="$WORKDIR/mesa"
 BUILD_ROOT="$WORKDIR/build"
 
 NDK_VERSION="${NDK_VERSION:-android-ndk-r29}"
-NDK="$WORKDIR/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+# Detect host platform for NDK prebuilt path
+case "$(uname -s)" in
+  Linux*)     NDK_PREBUILT=linux-x86_64 ;;
+  Darwin*)    NDK_PREBUILT=darwin-x86_64 ;;
+  *)          NDK_PREBUILT=windows-x86_64 ;;
+esac
+
+NDK="$WORKDIR/$NDK_VERSION/toolchains/llvm/prebuilt/$NDK_PREBUILT/bin"
 
 PLATFORM_SDK="${PLATFORM_SDK:-36}"
 MIN_API="${MIN_API:-28}"
