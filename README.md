@@ -225,3 +225,5 @@ This automated pipeline stands on the shoulders of giants. The emulation and dri
 *   **Mesa Source & Driver Binaries:** Inherits Mesa's MIT/X11 License. 
 *   **Android NDK:** Governed by Google's standard SDK license.
 *   **Imported Patches:** Retain their original author headers. See [`docs/PATCHES.md`](docs/PATCHES.md) for individual attribution.
+" C I / C D   U p d a t e "  
+ 
