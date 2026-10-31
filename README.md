@@ -5,9 +5,10 @@
 **The definitive, automated build and patch integration pipeline for Qualcomm Adreno GPUs.**
 
 [![Build Status](https://img.shields.io/badge/Build-Passing-success?style=for-the-badge&logo=githubactions)](https://github.com/ovsky/Vulkan-Turnip-Adreno-Driver/actions)
-[![Vulkan API](https://img.shields.io/badge/Vulkan-1.3-red?style=for-the-badge&logo=vulkan)](https://www.vulkan.org/)
+[![Vulkan API](https://img.shields.io/badge/Vulkan-1.3.296-red?style=for-the-badge&logo=vulkan)](https://www.vulkan.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.style=for-the-badge)](LICENSE)
 [![Mesa Mainline](https://img.shields.io/badge/Mesa-Upstream-orange?style=for-the-badge&logo=linux)](https://gitlab.freedesktop.org/mesa/mesa)
+[![Multi-Platform CI](https://img.shields.io/badge/CI-Linux%20|%20Windows%20|%20macOS-success?style=for-the-badge&logo=githubactions)](https://github.com/ovsky/Vulkan-Turnip-Adreno-Driver/actions)
 
 *Bringing desktop-class Vulkan APIs to Android emulation via the `libadrenotools` injection model.*
 
@@ -34,9 +35,13 @@ Verify a download:
 
 ## 🏗 Architecture & Ecosystem
 
-This repository provides highly optimized, pre-compiled binaries of **Turnip**—the open-source Freedreno Vulkan driver for Qualcomm Adreno GPUs. 
+This repository provides highly optimized, pre-compiled binaries of **Turnip**—the open-source Freedreno Vulkan driver for Qualcomm Adreno GPUs.
+
+**Built from upstream Mesa mainline** - The driver is compiled from upstream Mesa mainline with community patches applied on top, keeping us current without depending on a personal fork that stops being updated.
 
 Rather than relying on stagnant, personal Mesa forks, this toolkit dynamically compiles directly from **upstream Mesa mainline**. During the pipeline execution, it algorithmically injects and verifies critical community patches (KGSL correctness, OneUI workarounds, gen8 instruction sets) to ensure maximum compatibility with the modern emulation ecosystem.
+
+**Built & tested on multiple platforms** - GitHub Actions CI builds and tests on Linux, Windows, and macOS daily, ensuring cross-compilation compatibility and platform-specific bug detection.
 
 **Supported Injection Targets:**
 *   **Translation Layers:** Winlator, Termux-X11 + Box64, Cassia (upcoming)
