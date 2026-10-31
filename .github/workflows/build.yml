@@ -7,44 +7,75 @@ on:
         description: 'Optional custom tag suffix (leave blank to use run number)'
         required: false
         default: ''
+  schedule:
+    # Daily build at 02:00 UTC
+    - cron: '0 2 * * *'
 
 permissions:
   contents: write
+  issues: write
+
+env:
+  DEFAULT_BUILD_VERSION: ${{ github.run_number }}
+  DEFAULT_VULKAN_VERSION: '1.3.296'
+  DEFAULT_MESA_VERSION: '24.4.0-decl'
 
 jobs:
   build:
     name: Build & Release Turnip Drivers
-    runs-on: ubuntu-latest
-    
-    env:
-      BUILD_VERSION: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.run_number }}
+    # Build on all major platforms to ensure cross-compilation compatibility
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            ndk_prefix: linux-x86_64
+            shell: bash
+          - os: windows-latest
+            ndk_prefix: windows-x86_64
+            shell: cmd
+          - os: macos-latest
+            ndk_prefix: darwin-x86_64
+            shell: bash
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Display Build Version
+      - name: Display Build Configuration
         run: |
-          echo "Tag/Version to be built: ${{ env.BUILD_VERSION }}"
+          echo "Building on: ${{ matrix.os }}"
+          echo "NDK prefix: ${{ matrix.ndk_prefix }}"
+          echo "Shell: ${{ matrix.shell }}"
 
       - name: Install System Dependencies
+        shell: ${{ matrix.shell }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            ninja-build \
-            patchelf \
-            unzip \
-            flex \
-            bison \
-            git \
-            perl \
-            python3-pip \
-            glslang-tools \
-            curl \
-            zip \
-            ccache
+          if [[ ${{ matrix.os }} == 'ubuntu-latest' ]]; then
+            sudo apt-get update
+            sudo apt-get install -y \
+              ninja-build \
+              patchelf \
+              unzip \
+              flex \
+              bison \
+              git \
+              perl \
+              python3-pip \
+              glslang-tools \
+              curl \
+              zip \
+              ccache
+          elif [[ ${{ matrix.os }} == 'windows-latest' ]]; then
+            choco install -y ninja mako python3 glslang
+          elif [[ ${{ matrix.os }} == 'macos-latest' ]]; then
+            brew update
+            brew install ninja mako python3 glslang ccache
+          fi
 
       - name: Install Python Dependencies via Pip
+        shell: ${{ matrix.shell }}
         run: |
           pip3 install --no-cache-dir \
             --break-system-packages \
@@ -53,57 +84,68 @@ jobs:
             pyyaml
 
       - name: Prepare Build Directory
+        shell: ${{ matrix.shell }}
         run: |
           mkdir -p turnip_workdir
           chmod 777 turnip_workdir
 
-      - name: Patch & Build Turnip Drivers
+      - name: Detect NDK and Set Environment
+        shell: ${{ matrix.shell }}
+        run: |
+          export NDK_VERSION="android-ndk-r29"
+          case "$(uname -s)" in
+            Linux*)     NDK_PREBUILT="${{ matrix.ndk_prefix }}" ;;
+            Darwin*)    NDK_PREBUILT="${{ matrix.ndk_prefix }}" ;;
+            *)          NDK_PREBUILT="windows-x86_64" ;;
+          esac
+          export NDK_PATH="$WORKDIR/$NDK_VERSION/toolchains/llvm/prebuilt/$NDK_PREBUILT/bin"
+          echo "NDK PATH: $NDK_PATH"
+          if [ -d "$NDK_PATH" ]; then
+            echo "NDK found at $NDK_PATH"
+          else
+            echo "NDK not found at $NDK_PATH, will download..."
+            mkdir -p "$WORKDIR"
+            if [[ ${{ matrix.os }} == 'ubuntu-latest' || ${{ matrix.os }} == 'macos-latest' ]]; then
+              curl -O https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+              unzip -q android-ndk-r29-linux.zip -d "$WORKDIR/"
+            elif [[ ${{ matrix.os }} == 'windows-latest' ]]; then
+              curl -O https://dl.google.com/android/repository/android-ndk-r29-windows.zip
+              unzip -q android-ndk-r29-windows.zip -d "$WORKDIR/"
+            fi
+          fi
+
+      - name: Export Build Environment Variables
+        shell: ${{ matrix.shell }}
+        run: |
+          export MESA_VERSION="${DEFAULT_MESA_VERSION}"
+          export VK_VERSION="${DEFAULT_VULKAN_VERSION}"
+          export BUILD_VERSION="${{ env.DEFAULT_BUILD_VERSION }}"
+          echo "MESA_VERSION=$MESA_VERSION" >> $GITHUB_ENV
+          echo "VK_VERSION=$VK_VERSION" >> $GITHUB_ENV
+          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_ENV
+
+      - name: Patch Build Script Headers (Platform-Aware)
+        shell: ${{ matrix.shell }}
+        run: |
+          # Platform-aware patching: only set environment variables
+          export MESA_VERSION="$MESA_VERSION"
+          export VK_VERSION="$VK_VERSION"
+          export BUILD_VERSION="$BUILD_VERSION"
+
+      - name: Build Turnip Drivers
+        shell: ${{ matrix.shell }}
         run: |
           chmod +x build_turnip.sh
-          
-          # Use a robust Python script to dynamically patch mesa_facts and bypass header checks
-          python3 - <<'EOF'
-          import glob
-          import re
-
-          for filepath in glob.glob("**/*.sh", recursive=True):
-              with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                  content = f.read()
-              
-              if "mesa_facts" in content or "vulkan_core.h" in content:
-                  print(f"Patching version check in: {filepath}")
-                  pattern = r'(mesa_facts\s*\(\)\s*\{)(.*?)(\})'
-                  def replacement(match):
-                      header = match.group(1)
-                      footer = match.group(3)
-                      return header + '\n    MESA_VERSION="24.4.0"\n    VK_VERSION="1.3.296"\n    return 0\n' + footer
-                  
-                  content, count = re.subn(pattern, replacement, content, flags=re.DOTALL)
-                  
-                  content = re.sub(r'fail\s+.*could not determine.*', 'echo "Bypassed version check"', content)
-                  content = re.sub(r'fail\s+.*Mesa/Vulkan versions.*', 'echo "Bypassed version check"', content)
-                  
-                  with open(filepath, "w", encoding="utf-8") as f:
-                      f.write(content)
-          EOF
-
-          # Clean up any partial NDK downloads from previous runs
-          rm -rf turnip_workdir/android-ndk*
-          
-          export MESA_VERSION="24.4.0-devel"
-          export VK_VERSION="1.3.296"
-          export BUILD_VERSION="${{ env.BUILD_VERSION }}"
-          
           ./build_turnip.sh
 
       - name: Locate and Verify Build Output
-        id: locate_artifacts
+        shell: ${{ matrix.shell }}
         run: |
           echo "Searching for built driver zips..."
           find . -name "*.zip"
           
           mkdir -p final_artifacts
-          find . -maxdepth 3 -name "*.zip" -exec cp {} final_artifacts/ \;
+          find . -maxdepth 3 -name "*.zip" -exec cp {} final_artifacts/ \;;
           
           if [ -z "$(ls -A final_artifacts/*.zip 2>/dev/null)" ]; then
             echo "Error: No driver zip packages were found after compilation!"
@@ -114,12 +156,13 @@ jobs:
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Experimental-Turnip-Drivers-${{ env.BUILD_VERSION }}
+          name: Experimental-Turnip-Drivers-${{ env.BUILD_VERSION }}-${{ matrix.os }}
           path: final_artifacts/*.zip
           if-no-files-found: error
           retention-days: 30
 
       - name: Create GitHub Release
+        if: always()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.BUILD_VERSION }}
@@ -127,4 +170,5 @@ jobs:
           files: final_artifacts/*.zip
           generate_release_notes: true
           draft: false
-          prerelease: true
+          prerelease: ${{ !github.event.schedule && true || false }}
+
