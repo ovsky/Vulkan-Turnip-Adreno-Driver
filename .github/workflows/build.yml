@@ -171,4 +171,3 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ !github.event.schedule && true || false }}
-
